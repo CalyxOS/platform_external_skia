@@ -15,7 +15,7 @@
 #include "src/gpu/Blend.h"
 #include "src/gpu/graphite/DrawTypes.h"
 #include "src/gpu/graphite/GraphicsPipeline.h"
-#include "src/gpu/graphite/vk/VulkanGraphiteUtilsPriv.h"
+#include "src/gpu/graphite/vk/VulkanGraphiteUtils.h"
 #include "src/gpu/graphite/vk/VulkanSampler.h"
 
 namespace SkSL {
@@ -35,43 +35,37 @@ class VulkanRenderPass;
 
 class VulkanGraphicsPipeline final : public GraphicsPipeline {
 public:
-    inline static constexpr unsigned int kIntrinsicUniformBufferIndex = 0;
-    inline static constexpr unsigned int kRenderStepUniformBufferIndex = 1;
-    inline static constexpr unsigned int kPaintUniformBufferIndex = 2;
-    inline static constexpr unsigned int kGradientBufferIndex = 3;
-    inline static constexpr unsigned int kNumUniformBuffers = 4;
+    inline static constexpr unsigned int kRenderStepUniformBufferIndex = 0;
+    inline static constexpr unsigned int kPaintUniformBufferIndex = 1;
+    inline static constexpr unsigned int kGradientBufferIndex = 2;
+    inline static constexpr unsigned int kNumUniformBuffers = 3;
 
-    // For now, rigidly assign all uniform buffer descriptors to be in set 0 and all
-    // texture/samplers to be in set 1.
+    // For now, rigidly assign all descriptor types to be at statically-defined set indices.
     // TODO(b/274762935): Make the bindings and descriptor set organization more flexible.
-    inline static constexpr unsigned int kUniformBufferDescSetIndex = 0;
-    inline static constexpr unsigned int kTextureBindDescSetIndex = 1;
-    // Currently input attachments are only used for loading MSAA from resolve, so we can use the
-    // descriptor set index normally assigned to uniform desc sets.
-    inline static constexpr unsigned int kInputAttachmentDescSetIndex = kUniformBufferDescSetIndex;
+    inline static constexpr unsigned int kDstAsInputDescSetIndex = 0;
+    inline static constexpr unsigned int kUniformBufferDescSetIndex = 1;
+    inline static constexpr unsigned int kTextureBindDescSetIndex = 2;
+    inline static constexpr unsigned int kLoadMsaaFromResolveInputDescSetIndex = 3;
+    inline static constexpr unsigned int kMaxNumDescSets = 4;
 
     inline static constexpr unsigned int kVertexBufferIndex = 0;
     inline static constexpr unsigned int kInstanceBufferIndex = 1;
     inline static constexpr unsigned int kNumInputBuffers = 2;
 
-    inline static const DescriptorData kIntrinsicUniformBufferDescriptor = {
-            DescriptorType::kUniformBuffer, /*count=*/1,
-            kIntrinsicUniformBufferIndex,
-            PipelineStageFlags::kVertexShader | PipelineStageFlags::kFragmentShader};
-
-    // Currently we only ever have one input attachment descriptor by itself within a set, so its
-    // binding index will always be 0.
-    inline static constexpr unsigned int kInputAttachmentBindingIndex = 0;
+    // Define a static DescriptorData to represent input attachments which have the same values
+    // across all pipelines (we currently only ever use one input attachment within a set).
     inline static const DescriptorData kInputAttachmentDescriptor = {
             DescriptorType::kInputAttachment, /*count=*/1,
-            kInputAttachmentBindingIndex,
+            /*bindingIdx=*/0, // We only expect to encounter one input attachment
             PipelineStageFlags::kFragmentShader};
 
     static sk_sp<VulkanGraphicsPipeline> Make(VulkanResourceProvider*,
                                               const RuntimeEffectDictionary*,
+                                              const UniqueKey&,
                                               const GraphicsPipelineDesc&,
                                               const RenderPassDesc&,
-                                              SkEnumBitMask<PipelineCreationFlags>);
+                                              SkEnumBitMask<PipelineCreationFlags>,
+                                              uint32_t compilationID);
 
     static sk_sp<VulkanGraphicsPipeline> MakeLoadMSAAPipeline(
             const VulkanSharedContext*,

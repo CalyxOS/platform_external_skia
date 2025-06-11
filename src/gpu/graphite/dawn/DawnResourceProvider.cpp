@@ -9,7 +9,8 @@
 
 #include "include/gpu/graphite/BackendTexture.h"
 #include "include/gpu/graphite/TextureInfo.h"
-#include "include/gpu/graphite/dawn/DawnTypes.h"
+#include "include/gpu/graphite/dawn/DawnGraphiteTypes.h"
+#include "include/private/base/SingleOwner.h"
 #include "include/private/base/SkAlign.h"
 #include "src/gpu/graphite/ComputePipeline.h"
 #include "src/gpu/graphite/RenderPassDesc.h"
@@ -18,7 +19,7 @@
 #include "src/gpu/graphite/dawn/DawnComputePipeline.h"
 #include "src/gpu/graphite/dawn/DawnErrorChecker.h"
 #include "src/gpu/graphite/dawn/DawnGraphicsPipeline.h"
-#include "src/gpu/graphite/dawn/DawnGraphiteTypesPriv.h"
+#include "src/gpu/graphite/dawn/DawnGraphiteUtils.h"
 #include "src/gpu/graphite/dawn/DawnSampler.h"
 #include "src/gpu/graphite/dawn/DawnSharedContext.h"
 #include "src/gpu/graphite/dawn/DawnTexture.h"
@@ -33,10 +34,10 @@ constexpr int kMaxNumberOfCachedBufferBindGroups = 1024;
 constexpr int kMaxNumberOfCachedTextureBindGroups = 4096;
 
 wgpu::ShaderModule create_shader_module(const wgpu::Device& device, const char* source) {
-#ifdef WGPU_BREAKING_CHANGE_DROP_DESCRIPTOR
-    wgpu::ShaderSourceWGSL wgslDesc;
-#else
+#if defined(__EMSCRIPTEN__)
     wgpu::ShaderModuleWGSLDescriptor wgslDesc;
+#else
+    wgpu::ShaderSourceWGSL wgslDesc;
 #endif
     wgslDesc.code = source;
     wgpu::ShaderModuleDescriptor descriptor;
@@ -72,6 +73,8 @@ wgpu::RenderPipeline create_blit_render_pipeline(const DawnSharedContext* shared
     wgpu::FragmentState fragment;
     fragment.module = std::move(fsModule);
     fragment.entryPoint = "main";
+    fragment.constantCount = 0;
+    fragment.constants = nullptr;
     fragment.targetCount = 1;
     fragment.targets = &colorTarget;
     descriptor.fragment = &fragment;
@@ -347,47 +350,66 @@ template <typename T> void DawnResourceProvider::IntrinsicConstantsManager::purg
 // DawnResourceProvider::IntrinsicConstantsManager
 // ----------------------------------------------------------------------------
 
-
 DawnResourceProvider::DawnResourceProvider(SharedContext* sharedContext,
                                            SingleOwner* singleOwner,
                                            uint32_t recorderID,
                                            size_t resourceBudget)
         : ResourceProvider(sharedContext, singleOwner, recorderID, resourceBudget)
         , fUniformBufferBindGroupCache(kMaxNumberOfCachedBufferBindGroups)
-        , fSingleTextureSamplerBindGroups(kMaxNumberOfCachedTextureBindGroups) {
+        , fSingleTextureSamplerBindGroups(kMaxNumberOfCachedTextureBindGroups)
+        , fSingleOwner(singleOwner) {
     fIntrinsicConstantsManager = std::make_unique<IntrinsicConstantsManager>(this);
+
+    // Only used for debug asserts so this avoids compile errors.
+    (void)fSingleOwner;
 }
 
 DawnResourceProvider::~DawnResourceProvider() = default;
 
 wgpu::RenderPipeline DawnResourceProvider::findOrCreateBlitWithDrawPipeline(
-        const RenderPassDesc& renderPassDesc) {
-    uint32_t renderPassKey =
-            this->dawnSharedContext()->dawnCaps()->getRenderPassDescKeyForPipeline(renderPassDesc);
+        const RenderPassDesc& renderPassDesc, bool srcIsMSAA) {
+    uint32_t renderPassKey = this->dawnSharedContext()->dawnCaps()->getRenderPassDescKeyForPipeline(
+            renderPassDesc, srcIsMSAA);
     wgpu::RenderPipeline pipeline = fBlitWithDrawPipelines[renderPassKey];
     if (!pipeline) {
-        static constexpr char kVertexShaderText[] = R"(
-            var<private> fullscreenTriPositions : array<vec2<f32>, 3> = array<vec2<f32>, 3>(
-                vec2(-1.0, -1.0), vec2(-1.0, 3.0), vec2(3.0, -1.0));
+        static constexpr char kVertexShaderText[] =
+            "var<private> fullscreenTriPositions : array<vec2<f32>, 3> = array<vec2<f32>, 3>("
+                "vec2(-1.0, -1.0), vec2(-1.0, 3.0), vec2(3.0, -1.0));"
 
-            @vertex
-            fn main(@builtin(vertex_index) vertexIndex : u32) -> @builtin(position) vec4<f32> {
-                return vec4(fullscreenTriPositions[vertexIndex], 1.0, 1.0);
-            }
-        )";
+            "@vertex "
+            "fn main(@builtin(vertex_index) vertexIndex : u32) -> @builtin(position) vec4<f32> {"
+                "return vec4(fullscreenTriPositions[vertexIndex], 1.0, 1.0);"
+            "}";
 
-        static constexpr char kFragmentShaderText[] = R"(
-            @group(0) @binding(0) var colorMap: texture_2d<f32>;
+        static constexpr char kFragmentShaderText[] =
+            "@group(0) @binding(0) var colorMap: texture_2d<f32>;"
 
-            @fragment
-            fn main(@builtin(position) fragPosition : vec4<f32>) -> @location(0) vec4<f32> {
-                var coords : vec2<i32> = vec2<i32>(i32(fragPosition.x), i32(fragPosition.y));
-                return textureLoad(colorMap, coords, 0);
-            }
-        )";
+            "@fragment "
+            "fn main(@builtin(position) fragPosition : vec4<f32>) -> @location(0) vec4<f32> {"
+                "let coords = vec2<i32>(i32(fragPosition.x), i32(fragPosition.y));"
+                "return textureLoad(colorMap, coords, 0);"
+            "}";
+
+        static constexpr char kFragmentShaderMSAAText[] =
+            "@group(0) @binding(0) var colorMap: texture_multisampled_2d<f32>;"
+            "@fragment\n"
+            "fn main(@builtin(position) fragPosition : vec4<f32>) -> @location(0) vec4<f32> {"
+                "let coords = vec2<i32>(i32(fragPosition.x), i32(fragPosition.y));"
+                "var sum = vec4f(0.0);"
+                "let sampleCount = textureNumSamples(colorMap);"
+                "for (var i: u32 = 0; i < sampleCount; i = i + 1) {"
+                    "sum += textureLoad(colorMap, coords, i);"
+                "}"
+                "return sum / f32(sampleCount);"
+            "}";
 
         auto vsModule = create_shader_module(dawnSharedContext()->device(), kVertexShaderText);
-        auto fsModule = create_shader_module(dawnSharedContext()->device(), kFragmentShaderText);
+        auto fsModule =
+                create_shader_module(dawnSharedContext()->device(),
+                                     srcIsMSAA ? kFragmentShaderMSAAText : kFragmentShaderText);
+
+        const auto& colorTexInfo = renderPassDesc.fColorAttachment.fTextureInfo;
+        const auto& dsTexInfo = renderPassDesc.fDepthStencilAttachment.fTextureInfo;
 
         pipeline = create_blit_render_pipeline(
                 dawnSharedContext(),
@@ -395,11 +417,10 @@ wgpu::RenderPipeline DawnResourceProvider::findOrCreateBlitWithDrawPipeline(
                 std::move(vsModule),
                 std::move(fsModule),
                 /*renderPassColorFormat=*/
-                TextureInfos::GetDawnViewFormat(renderPassDesc.fColorAttachment.fTextureInfo),
+                TextureInfoPriv::Get<DawnTextureInfo>(colorTexInfo).getViewFormat(),
                 /*renderPassDepthStencilFormat=*/
-                renderPassDesc.fDepthStencilAttachment.fTextureInfo.isValid()
-                        ? TextureInfos::GetDawnViewFormat(
-                                  renderPassDesc.fDepthStencilAttachment.fTextureInfo)
+                dsTexInfo.isValid()
+                        ? TextureInfoPriv::Get<DawnTextureInfo>(dsTexInfo).getViewFormat()
                         : wgpu::TextureFormat::Undefined,
                 /*numSamples=*/renderPassDesc.fColorAttachment.fTextureInfo.numSamples());
 
@@ -439,8 +460,7 @@ sk_sp<DawnTexture> DawnResourceProvider::findOrCreateDiscardableMSAALoadTexture(
     SkASSERT(msaaInfo.isValid());
 
     // Derive the load texture's info from MSAA texture's info.
-    DawnTextureInfo dawnMsaaLoadTextureInfo;
-    SkAssertResult(TextureInfos::GetDawnTextureInfo(msaaInfo, &dawnMsaaLoadTextureInfo));
+    DawnTextureInfo dawnMsaaLoadTextureInfo = TextureInfoPriv::Get<DawnTextureInfo>(msaaInfo);
     dawnMsaaLoadTextureInfo.fSampleCount = 1;
     dawnMsaaLoadTextureInfo.fUsage |= wgpu::TextureUsage::TextureBinding;
 
@@ -462,15 +482,19 @@ sk_sp<DawnTexture> DawnResourceProvider::findOrCreateDiscardableMSAALoadTexture(
 
 sk_sp<GraphicsPipeline> DawnResourceProvider::createGraphicsPipeline(
         const RuntimeEffectDictionary* runtimeDict,
+        const UniqueKey& pipelineKey,
         const GraphicsPipelineDesc& pipelineDesc,
         const RenderPassDesc& renderPassDesc,
-        SkEnumBitMask<PipelineCreationFlags> pipelineCreationFlags) {
+        SkEnumBitMask<PipelineCreationFlags> pipelineCreationFlags,
+        uint32_t compilationID) {
     return DawnGraphicsPipeline::Make(this->dawnSharedContext(),
                                       this,
                                       runtimeDict,
+                                      pipelineKey,
                                       pipelineDesc,
                                       renderPassDesc,
-                                      pipelineCreationFlags);
+                                      pipelineCreationFlags,
+                                      compilationID);
 }
 
 sk_sp<ComputePipeline> DawnResourceProvider::createComputePipeline(
@@ -478,13 +502,8 @@ sk_sp<ComputePipeline> DawnResourceProvider::createComputePipeline(
     return DawnComputePipeline::Make(this->dawnSharedContext(), desc);
 }
 
-sk_sp<Texture> DawnResourceProvider::createTexture(SkISize dimensions,
-                                                   const TextureInfo& info,
-                                                   skgpu::Budgeted budgeted) {
-    return DawnTexture::Make(this->dawnSharedContext(),
-                             dimensions,
-                             info,
-                             budgeted);
+sk_sp<Texture> DawnResourceProvider::createTexture(SkISize dimensions, const TextureInfo& info) {
+    return DawnTexture::Make(this->dawnSharedContext(), dimensions, info);
 }
 
 sk_sp<Buffer> DawnResourceProvider::createBuffer(size_t size,
@@ -540,6 +559,8 @@ sk_sp<DawnBuffer> DawnResourceProvider::findOrCreateDawnBuffer(size_t size,
 }
 
 const wgpu::BindGroupLayout& DawnResourceProvider::getOrCreateUniformBuffersBindGroupLayout() {
+    SKGPU_ASSERT_SINGLE_OWNER(fSingleOwner)
+
     if (fUniformBuffersBindGroupLayout) {
         return fUniformBuffersBindGroupLayout;
     }
@@ -593,6 +614,8 @@ const wgpu::BindGroupLayout& DawnResourceProvider::getOrCreateUniformBuffersBind
 
 const wgpu::BindGroupLayout&
 DawnResourceProvider::getOrCreateSingleTextureSamplerBindGroupLayout() {
+    SKGPU_ASSERT_SINGLE_OWNER(fSingleOwner)
+
     if (fSingleTextureSamplerBindGroupLayout) {
         return fSingleTextureSamplerBindGroupLayout;
     }
@@ -643,6 +666,8 @@ const wgpu::Buffer& DawnResourceProvider::getOrCreateNullBuffer() {
 const wgpu::BindGroup& DawnResourceProvider::findOrCreateUniformBuffersBindGroup(
         const std::array<std::pair<const DawnBuffer*, uint32_t>, kNumUniformEntries>&
                 boundBuffersAndSizes) {
+    SKGPU_ASSERT_SINGLE_OWNER(fSingleOwner)
+
     auto key = make_ubo_bind_group_key(boundBuffersAndSizes);
     auto* existingBindGroup = fUniformBufferBindGroupCache.find(key);
     if (existingBindGroup) {
@@ -688,6 +713,8 @@ const wgpu::BindGroup& DawnResourceProvider::findOrCreateUniformBuffersBindGroup
 
 const wgpu::BindGroup& DawnResourceProvider::findOrCreateSingleTextureSamplerBindGroup(
         const DawnSampler* sampler, const DawnTexture* texture) {
+    SKGPU_ASSERT_SINGLE_OWNER(fSingleOwner)
+
     auto key = make_texture_bind_group_key(sampler, texture);
     auto* existingBindGroup = fSingleTextureSamplerBindGroups.find(key);
     if (existingBindGroup) {
@@ -714,7 +741,14 @@ const wgpu::BindGroup& DawnResourceProvider::findOrCreateSingleTextureSamplerBin
 }
 
 void DawnResourceProvider::onFreeGpuResources() {
+    SKGPU_ASSERT_SINGLE_OWNER(fSingleOwner)
+
     fIntrinsicConstantsManager->freeGpuResources();
+    // The wgpu::Textures and wgpu::Buffers held by the BindGroups should be explicitly destroyed
+    // when the DawnTexture and DawnBuffer is destroyed, but removing the bind groups themselves
+    // helps reduce CPU memory periodically.
+    fSingleTextureSamplerBindGroups.reset();
+    fUniformBufferBindGroupCache.reset();
 }
 
 void DawnResourceProvider::onPurgeResourcesNotUsedSince(StdSteadyClock::time_point purgeTime) {

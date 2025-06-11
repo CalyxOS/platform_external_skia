@@ -92,6 +92,12 @@ alias(
 ###
 
 alias(
+    name = "graphite_dawn_vulkan",
+    actual = "//src/gpu/graphite/vk:graphite_dawn_vulkan",
+    visibility = ["//visibility:public"],
+)
+
+alias(
     name = "graphite_native_metal",
     actual = "//src/gpu/graphite/mtl:graphite_native_metal",
     visibility = ["//visibility:public"],
@@ -232,6 +238,20 @@ alias(
 alias(
     name = "pdf_writer",
     actual = "//src/pdf:pdf",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "pdf_jpeg_helpers",
+    actual = "//src/pdf:jpeg_helpers",
+    visibility = ["//visibility:public"],
+)
+
+###
+
+alias(
+    name = "skottie",
+    actual = "//modules/skottie:skottie",
     visibility = ["//visibility:public"],
 )
 

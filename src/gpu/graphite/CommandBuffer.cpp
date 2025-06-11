@@ -92,38 +92,35 @@ bool CommandBuffer::addRenderPass(const RenderPassDesc& renderPassDesc,
                                   sk_sp<Texture> resolveTexture,
                                   sk_sp<Texture> depthStencilTexture,
                                   const Texture* dstCopy,
-                                  SkIRect dstCopyBounds,
+                                  SkIRect dstReadBounds,
                                   SkISize viewportDims,
                                   const DrawPassList& drawPasses) {
     TRACE_EVENT0("skia.gpu", TRACE_FUNC);
-
-    fColorAttachmentSize = colorTexture->dimensions();
-    SkIRect colorAttachmentBounds = SkIRect::MakeSize(fColorAttachmentSize);
 
     SkIRect renderPassBounds;
     for (const auto& drawPass : drawPasses) {
         renderPassBounds.join(drawPass->bounds());
     }
     if (renderPassDesc.fColorAttachment.fLoadOp == LoadOp::kClear) {
-        renderPassBounds.join(colorAttachmentBounds);
+        renderPassBounds.join(fRenderPassBounds);
     }
     renderPassBounds.offset(fReplayTranslation.x(), fReplayTranslation.y());
-    if (!renderPassBounds.intersect(colorAttachmentBounds)) {
+    if (!renderPassBounds.intersect(fRenderPassBounds)) {
         // The entire RenderPass is offscreen given the replay translation so skip adding the pass
         // at all
         return true;
     }
 
-    dstCopyBounds.offset(fReplayTranslation.x(), fReplayTranslation.y());
-    if (!dstCopyBounds.intersect(colorAttachmentBounds)) {
+    dstReadBounds.offset(fReplayTranslation.x(), fReplayTranslation.y());
+    if (!dstReadBounds.intersect(fRenderPassBounds)) {
         // The draws within the RenderPass that would sample from the dstCopy have been translated
         // off screen. Set the bounds to empty and let the GPU clipping do its job.
-        dstCopyBounds = SkIRect::MakeEmpty();
+        dstReadBounds = SkIRect::MakeEmpty();
     }
     // Save the dstCopy texture so that it can be embedded into texture bind commands later on.
     // Stash the texture's full dimensions on the rect so we can calculate normalized coords later.
     fDstCopy.first = dstCopy;
-    fDstCopyBounds = dstCopy ? SkIRect::MakePtSize(dstCopyBounds.topLeft(), dstCopy->dimensions())
+    fDstReadBounds = dstCopy ? SkIRect::MakePtSize(dstReadBounds.topLeft(), dstCopy->dimensions())
                              : SkIRect::MakeEmpty();
     if (dstCopy && !fDstCopy.second) {
         // Only lookup the sampler the first time we require a dstCopy. The texture can change
@@ -285,6 +282,22 @@ bool CommandBuffer::clearBuffer(const Buffer* buffer, size_t offset, size_t size
     }
 
     SkDEBUGCODE(fHasWork = true;)
+
+    return true;
+}
+
+bool CommandBuffer::setReplayTranslationAndClip(const SkIVector& translation,
+                                                const SkIRect& clip,
+                                                const SkIRect& renderTargetBounds) {
+    fReplayTranslation = translation;
+    fRenderPassBounds = renderTargetBounds;
+
+    // If a replay clip is defined, we intersect it with the render target bounds.
+    if (!clip.isEmpty()) {
+        if (!fRenderPassBounds.intersect(clip.makeOffset(translation))) {
+            return false;
+        }
+    }
 
     return true;
 }

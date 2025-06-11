@@ -17,11 +17,11 @@
 
 namespace skgpu::graphite {
 
+class Buffer;
 class VulkanBuffer;
 class VulkanDescriptorSet;
 class VulkanSharedContext;
 class VulkanTexture;
-class Buffer;
 
 class VulkanCommandBuffer final : public CommandBuffer {
 public:
@@ -96,11 +96,20 @@ private:
     void recordTextureAndSamplerDescSet(
             const DrawPass*, const DrawPassCommands::BindTexturesAndSamplers*);
 
+    bool updateAndBindInputAttachment(const VulkanTexture&, const int setIdx);
     void bindTextureSamplers();
     void bindUniformBuffers();
     void syncDescriptorSets();
 
+    struct PushConstantInfo {
+        uint32_t fOffset;
+        uint32_t fSize;
+        VkShaderStageFlagBits fShaderStageFlagBits;
+        const void* fValues;
+    };
     void bindGraphicsPipeline(const GraphicsPipeline*);
+    void pushConstants(const PushConstantInfo&, VkPipelineLayout compatibleLayout);
+
     void setBlendConstants(float* blendConstants);
     void bindDrawBuffers(const BindBufferInfo& vertices,
                          const BindBufferInfo& instances,
@@ -125,6 +134,7 @@ private:
                               unsigned int baseInstance, unsigned int instanceCount);
     void drawIndirect(PrimitiveType type);
     void drawIndexedIndirect(PrimitiveType type);
+    void addBarrier(BarrierType type);
 
     // TODO: The virtuals in this class have not yet been implemented as we still haven't
     // implemented the objects they use.
@@ -158,7 +168,7 @@ private:
     bool onSynchronizeBufferToCpu(const Buffer*, bool* outDidResultInWork) override;
     bool onClearBuffer(const Buffer*, size_t offset, size_t size) override;
 
-    enum BarrierType {
+    enum PipelineBarrierType {
         kBufferMemory_BarrierType,
         kImageMemory_BarrierType
     };
@@ -166,23 +176,14 @@ private:
                          VkPipelineStageFlags srcStageMask,
                          VkPipelineStageFlags dstStageMask,
                          bool byRegion,
-                         BarrierType barrierType,
+                         PipelineBarrierType barrierType,
                          void* barrier);
     void submitPipelineBarriers(bool forSelfDependency = false);
-
-    // Update the intrinsic constant uniform buffer and binding to reflect the updated viewport.
-    // The resource provider is responsible for finding a suitable buffer and managing its lifetime.
-    bool updateIntrinsicUniforms(SkIRect viewport);
 
     bool loadMSAAFromResolve(const RenderPassDesc&,
                              VulkanTexture& resolveTexture,
                              SkISize dstDimensions,
                              SkIRect nativeBounds);
-    bool updateAndBindLoadMSAAInputAttachment(const VulkanTexture& resolveTexture);
-    void updateBuffer(const VulkanBuffer* buffer,
-                      const void* data,
-                      size_t dataSize,
-                      size_t dstOffset = 0);
     void nextSubpass();
     void setViewport(SkIRect viewport);
 
@@ -230,9 +231,6 @@ private:
     size_t fBoundIndirectBufferOffset = 0;
 
     float fCachedBlendConstant[4];
-
-    class IntrinsicConstantsManager;
-    std::unique_ptr<IntrinsicConstantsManager> fIntrinsicConstants;
 };
 
 } // namespace skgpu::graphite

@@ -341,9 +341,9 @@ void MtlCommandBuffer::endRenderPass() {
 }
 
 void MtlCommandBuffer::addDrawPass(const DrawPass* drawPass) {
-    SkIRect replayPassBounds = drawPass->bounds().makeOffset(fReplayTranslation.x(),
-                                                             fReplayTranslation.y());
-    if (!SkIRect::Intersects(replayPassBounds, SkIRect::MakeSize(fColorAttachmentSize))) {
+    const SkIRect replayedBounds = drawPass->bounds().makeOffset(fReplayTranslation.x(),
+                                                                 fReplayTranslation.y());
+    if (!SkIRect::Intersects(replayedBounds, fRenderPassBounds)) {
         // The entire DrawPass is offscreen given the replay translation so skip adding any
         // commands. When the DrawPass is partially offscreen individual draw commands will be
         // culled while preserving state changing commands.
@@ -444,6 +444,10 @@ void MtlCommandBuffer::addDrawPass(const DrawPass* drawPass) {
                 this->drawIndexedIndirect(draw->fType);
                 break;
             }
+            case DrawPassCommands::Type::kAddBarrier: {
+                SKGPU_LOG_E("MtlCommandBuffer does not support the addition of barriers.");
+                break;
+            }
         }
     }
 }
@@ -483,7 +487,7 @@ void MtlCommandBuffer::bindGraphicsPipeline(const GraphicsPipeline* graphicsPipe
     uint32_t stencilRefValue = mtlPipeline->stencilReferenceValue();
     fActiveRenderCommandEncoder->setStencilReferenceValue(stencilRefValue);
 
-    if (graphicsPipeline->dstReadRequirement() == DstReadRequirement::kTextureCopy) {
+    if (graphicsPipeline->dstReadStrategy() == DstReadStrategy::kTextureCopy) {
         // The last texture binding is reserved for the dstCopy texture, which is not included in
         // the list on each BindTexturesAndSamplers command. We can set it once now and any
         // subsequent BindTexturesAndSamplers commands in a DrawPass will set the other N-1.
@@ -585,7 +589,7 @@ void MtlCommandBuffer::bindTextureAndSampler(const Texture* texture,
 void MtlCommandBuffer::setScissor(const Scissor& scissor) {
     SkASSERT(fActiveRenderCommandEncoder);
 
-    SkIRect rect = scissor.getRect(fReplayTranslation, fReplayClip);
+    SkIRect rect = scissor.getRect(fReplayTranslation, fRenderPassBounds);
     fDrawIsOffscreen = rect.isEmpty();
 
     fActiveRenderCommandEncoder->setScissorRect({
@@ -610,7 +614,7 @@ void MtlCommandBuffer::setViewport(float x, float y, float width, float height,
 
 void MtlCommandBuffer::updateIntrinsicUniforms(SkIRect viewport) {
     UniformManager intrinsicValues{Layout::kMetal};
-    CollectIntrinsicUniforms(fSharedContext->caps(), viewport, fDstCopyBounds, &intrinsicValues);
+    CollectIntrinsicUniforms(fSharedContext->caps(), viewport, fDstReadBounds, &intrinsicValues);
     SkSpan<const char> bytes = intrinsicValues.finish();
     fActiveRenderCommandEncoder->setVertexBytes(
             bytes.data(), bytes.size_bytes(), MtlGraphicsPipeline::kIntrinsicUniformBufferIndex);

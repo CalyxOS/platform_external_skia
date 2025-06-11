@@ -305,10 +305,24 @@ cc_binary(
     ],
     deps = [
         "@skia//:core",
+        "@skia//:pdf_jpeg_helpers",
         "@skia//:pdf_writer",
     ] + select({
         "@platforms//os:linux": ["@skia//:fontmgr_fontconfig_freetype"],
         "@platforms//os:macos": ["@skia//:fontmgr_coretext"],
         "//conditions:default": [],
     }),
+)
+
+cc_binary(
+    name = "play_skottie",
+    srcs = ["src/play_skottie.cpp"],
+    linkopts = [
+        "-lpthread",
+    ],
+    deps = [
+        "@skia//:core",
+        "@skia//:png_encode_codec",
+        "@skia//:skottie",
+    ],
 )

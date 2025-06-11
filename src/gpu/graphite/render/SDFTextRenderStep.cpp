@@ -28,14 +28,12 @@
 #include "src/gpu/graphite/TextureProxy.h"
 #include "src/gpu/graphite/geom/Geometry.h"
 #include "src/gpu/graphite/geom/SubRunData.h"
-#include "src/gpu/graphite/geom/Transform_graphite.h"
+#include "src/gpu/graphite/geom/Transform.h"
 #include "src/gpu/graphite/render/CommonDepthStencilSettings.h"
 #include "src/gpu/graphite/text/TextAtlasManager.h"
 #include "src/sksl/SkSLString.h"
 #include "src/text/gpu/SubRunContainer.h"
 #include "src/text/gpu/VertexFiller.h"
-
-#include <string_view>
 
 #if defined(SK_GAMMA_APPLY_TO_A8)
 #include "include/private/base/SkCPUTypes.h"
@@ -53,8 +51,7 @@ constexpr int kNumSDFAtlasTextures = 4;
 }  // namespace
 
 SDFTextRenderStep::SDFTextRenderStep()
-        : RenderStep("SDFTextRenderStep",
-                     "",
+        : RenderStep(RenderStepID::kSDFText,
                      Flags::kPerformsShading | Flags::kHasTextures | Flags::kEmitsCoverage,
                      /*uniforms=*/{{"subRunDeviceMatrix", SkSLType::kFloat4x4},
                                    {"deviceToLocal", SkSLType::kFloat4x4},

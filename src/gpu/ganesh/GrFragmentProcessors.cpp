@@ -27,7 +27,6 @@
 #include "include/gpu/ganesh/GrRecordingContext.h"
 #include "include/gpu/ganesh/GrTypes.h"
 #include "include/gpu/ganesh/SkSurfaceGanesh.h"
-#include "include/private/SkColorData.h"
 #include "include/private/base/SkAssert.h"
 #include "include/private/base/SkDebug.h"
 #include "include/private/base/SkTArray.h"
@@ -35,6 +34,7 @@
 #include "src/base/SkTLazy.h"
 #include "src/core/SkBlendModeBlender.h"
 #include "src/core/SkBlenderBase.h"
+#include "src/core/SkColorData.h"
 #include "src/core/SkColorSpacePriv.h"
 #include "src/core/SkColorSpaceXformSteps.h"
 #include "src/core/SkMaskFilterBase.h"
@@ -533,13 +533,7 @@ static std::unique_ptr<GrFragmentProcessor> make_shader_fp(const SkColorFilterSh
 static std::unique_ptr<GrFragmentProcessor> make_shader_fp(const SkColorShader* shader,
                                                            const GrFPArgs& args,
                                                            const SkShaders::MatrixRec& mRec) {
-    return GrFragmentProcessor::MakeColor(SkColorToPMColor4f(shader->color(), *args.fDstColorInfo));
-}
-
-static std::unique_ptr<GrFragmentProcessor> make_shader_fp(const SkColor4Shader* shader,
-                                                           const GrFPArgs& args,
-                                                           const SkShaders::MatrixRec& mRec) {
-    SkColorSpaceXformSteps steps{shader->colorSpace().get(),
+    SkColorSpaceXformSteps steps{sk_srgb_singleton(),
                                  kUnpremul_SkAlphaType,
                                  args.fDstColorInfo->colorSpace(),
                                  kUnpremul_SkAlphaType};

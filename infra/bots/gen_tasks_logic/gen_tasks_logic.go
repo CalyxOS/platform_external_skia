@@ -66,6 +66,9 @@ const (
 	COMPILE_TASK_NAME_OS_LINUX_OLD = "Debian9"
 	DEFAULT_OS_MAC                 = "Mac-14.5"
 	DEFAULT_OS_WIN_GCE             = "Windows-Server-17763"
+	UBUNTU_20_04_OS                = "Ubuntu-20.04"
+	UBUNTU_22_04_OS                = "Ubuntu-22.04"
+	UBUNTU_24_04_OS                = "Ubuntu-24.04"
 
 	// Small is a 2-core machine.
 	// TODO(dogben): Would n1-standard-1 or n1-standard-2 be sufficient?
@@ -203,7 +206,9 @@ var (
 			Path: "mac_toolchain",
 			// When this is updated, also update
 			// https://skia.googlesource.com/skcms.git/+/f1e2b45d18facbae2dece3aca673fe1603077846/infra/bots/gen_tasks.go#56
-			Version: "git_revision:e6f45bde6c5ee56924b1f905159b6a1a48ef25dd",
+			// and
+			// https://skia.googlesource.com/skia.git/+/main/infra/bots/recipe_modules/xcode/api.py#38
+			Version: "git_revision:0cb1e51344de158f72524c384f324465aebbcef2",
 		},
 	}
 
@@ -447,6 +452,7 @@ func GenTasks(cfg *Config) {
 			"skia/tools",
 			// Needed for tests.
 			"skia/bench", // Needed to run benchmark tests with Bazel.
+			"skia/dm",    // Needed to run tests with Bazel.
 			"skia/gm",    // Needed to run GMs with Bazel.
 			"skia/gn",    // Some Python scripts still live here.
 			"skia/resources",
@@ -736,7 +742,7 @@ func (b *jobBuilder) deriveCompileTaskName() string {
 				"SkottieTracing", "SkottieWASM", "GpuTess", "DMSAAStats", "Docker", "PDF",
 				"Puppeteer", "SkottieFrames", "RenderSKP", "CanvasPerf", "AllPathsVolatile",
 				"WebGL2", "i5", "OldestSupportedSkpVersion", "FakeWGPU", "TintIR", "Protected",
-				"AndroidNDKFonts"}
+				"AndroidNDKFonts", "Upload", "TestPrecompile"}
 			keep := make([]string, 0, len(ec))
 			for _, part := range ec {
 				if !In(part, ignore) {
@@ -753,7 +759,7 @@ func (b *jobBuilder) deriveCompileTaskName() string {
 		} else if b.os("ChromeOS") {
 			ec = append([]string{"Chromebook", "GLES"}, ec...)
 			task_os = COMPILE_TASK_NAME_OS_LINUX
-		} else if b.os("iOS") {
+		} else if b.matchOs("iOS") {
 			ec = append([]string{task_os}, ec...)
 			if b.parts["compiler"] == "Xcode11.4.1" {
 				task_os = "Mac10.15.7"
@@ -829,25 +835,24 @@ func (b *taskBuilder) swarmDimensions() {
 var androidDeviceInfos = map[string][]string{
 	"AndroidOne":      {"sprout", "MOB30Q"},
 	"GalaxyS7_G930FD": {"herolte", "R16NW_G930FXXS2ERH6"}, // This is Oreo.
-	"GalaxyS9":        {"starlte", "QP1A.190711.020"},     // This is Android10.
 	"GalaxyS20":       {"exynos990", "QP1A.190711.020"},
 	"GalaxyS24":       {"pineapple", "UP1A.231005.007"},
 	"JioNext":         {"msm8937", "RKQ1.210602.002"},
 	"Mokey":           {"mokey", "UDC_11161052"},
 	"MokeyGo32":       {"mokey_go32", "UQ1A.240105.003.A1_11159138"},
+	"MotoG73":         {"devonf", "U1TNS34.82-12-7-6"},
 	"Nexus5":          {"hammerhead", "M4B30Z_3437181"},
 	"Nexus7":          {"grouper", "LMY47V_1836172"}, // 2012 Nexus 7
 	"P30":             {"HWELE", "HUAWEIELE-L29"},
-	"Pixel2XL":        {"taimen", "PPR1.180610.009"},
-	"Pixel3":          {"blueline", "PQ1A.190105.004"},
 	"Pixel3a":         {"sargo", "QP1A.190711.020"},
 	"Pixel4":          {"flame", "RPB2.200611.009"},       // R Preview
 	"Pixel4a":         {"sunfish", "AOSP.MASTER_7819821"}, // Pixel4a flashed with an Android HWASan build.
 	"Pixel4XL":        {"coral", "QD1A.190821.011.C4"},
 	"Pixel5":          {"redfin", "RD1A.200810.022.A4"},
 	"Pixel6":          {"oriole", "SD1A.210817.037"},
-	"Pixel7":          {"cheetah", "TD1A.221105.002"},
-	"Pixel9":          {"tokay", "AD1A.240905.004"},
+	"Pixel7":          {"panther", "AP4A.241205.013"},
+	"Pixel7Pro":       {"cheetah", "TD1A.221105.002"},
+	"Pixel9":          {"tokay", "AP4A.241205.013"},
 	"TecnoSpark3Pro":  {"TECNO-KB8", "PPR1.180610.011"},
 	"Wembley":         {"wembley", "SP2A.220505.008"},
 }
@@ -859,25 +864,31 @@ func (b *taskBuilder) defaultSwarmDimensions() {
 	}
 	if os, ok := b.parts["os"]; ok {
 		d["os"], ok = map[string]string{
-			"Android":    "Android",
-			"Android12":  "Android",
-			"ChromeOS":   "ChromeOS",
-			"Debian9":    DEFAULT_OS_LINUX_GCE, // Runs in Deb9 Docker.
-			"Debian10":   DEFAULT_OS_LINUX_GCE,
-			"Debian11":   DEBIAN_11_OS,
-			"Mac":        DEFAULT_OS_MAC,
-			"Mac10.15.1": "Mac-10.15.1",
-			"Mac10.15.7": "Mac-10.15.7",
-			"Mac11":      "Mac-11.4",
-			"Mac12":      "Mac-12",
-			"Mac13":      "Mac-13",
-			"Mokey":      "Android",
-			"MokeyGo32":  "Android",
-			"Ubuntu18":   "Ubuntu-18.04",
-			"Win":        DEFAULT_OS_WIN_GCE,
-			"Win10":      "Windows-10-19045",
-			"Win2019":    DEFAULT_OS_WIN_GCE,
-			"iOS":        "iOS-13.3.1",
+			"Android":     "Android",
+			"Android12":   "Android",
+			"ChromeOS":    "ChromeOS",
+			"Debian9":     DEFAULT_OS_LINUX_GCE, // Runs in Deb9 Docker.
+			"Debian10":    DEFAULT_OS_LINUX_GCE,
+			"Debian11":    DEBIAN_11_OS,
+			"Mac":         DEFAULT_OS_MAC,
+			"Mac10.15.1":  "Mac-10.15.1",
+			"Mac10.15.7":  "Mac-10.15.7",
+			"Mac12":       "Mac-12",
+			"Mac13":       "Mac-13",
+			"Mac14":       "Mac-14.7", // Builds run on 14.5, tests on 14.7.
+			"Mac15":       "Mac-15.3",
+			"Mokey":       "Android",
+			"MokeyGo32":   "Android",
+			"Ubuntu18":    "Ubuntu-18.04",
+			"Ubuntu20.04": UBUNTU_20_04_OS,
+			"Ubuntu22.04": UBUNTU_22_04_OS,
+			"Ubuntu24.04": UBUNTU_24_04_OS,
+			"Win":         DEFAULT_OS_WIN_GCE,
+			"Win10":       "Windows-10-19045",
+			"Win11":       "Windows-11-26100.1742",
+			"Win2019":     DEFAULT_OS_WIN_GCE,
+			"iOS":         "iOS-13.3.1",
+			"iOS18":       "iOS-18.2.1",
 		}[os]
 		if !ok {
 			log.Fatalf("Entry %q not found in OS mapping.", os)
@@ -889,8 +900,8 @@ func (b *taskBuilder) defaultSwarmDimensions() {
 			// ChOps-owned machines have Windows 10 22H2.
 			d["os"] = "Windows-10-19045"
 		}
-		if b.parts["model"] == "iPhone11" {
-			d["os"] = "iOS-13.6"
+		if strings.Contains(os, "iOS") {
+			d["pool"] = "SkiaIOS"
 		}
 		if b.parts["model"] == "iPadPro" {
 			d["os"] = "iOS-13.6"
@@ -931,24 +942,41 @@ func (b *taskBuilder) defaultSwarmDimensions() {
 			if b.extraConfig("HWASAN") {
 				d["android_hwasan_build"] = "1"
 			}
-		} else if b.os("iOS") {
+		} else if b.os("ChromeOS") {
+			// TODO(borenet): Make this mapping non-optional after removing the
+			// old devices in the Skia lab.
+			deviceOS, ok := map[string]string{
+				"Cherry":   "16002.30.0",
+				"Guybrush": "16002.27.0",
+				"Octopus":  "16002.21.0",
+				"Trogdor":  "16002.26.0",
+			}[b.parts["model"]]
+			if ok {
+				d["device_os"] = deviceOS
+				d["device_type"] = strings.ToLower(b.parts["model"])
+			}
+		} else if b.matchOs("iOS") {
 			device, ok := map[string]string{
-				"iPadMini4": "iPad5,1",
-				"iPhone7":   "iPhone9,1",
-				"iPhone8":   "iPhone10,1",
-				"iPhone11":  "iPhone12,1",
-				"iPadPro":   "iPad6,3",
+				"iPadMini4":   "iPad5,1",
+				"iPhone15Pro": "iPhone16,1",
+				"iPhone7":     "iPhone9,1",
+				"iPhone8":     "iPhone10,1",
+				"iPadPro":     "iPad6,3",
 			}[b.parts["model"]]
 			if !ok {
 				log.Fatalf("Entry %q not found in iOS mapping.", b.parts["model"])
 			}
-			d["device_type"] = device
+			d["device"] = device
 		} else if b.cpu() || b.extraConfig("CanvasKit", "Docker", "SwiftShader") {
 			modelMapping, ok := map[string]map[string]string{
 				"AppleM1": {
 					"MacMini9.1": "arm64-64-Apple_M1",
 				},
+				"AppleM3": {
+					"MacBookPro15.3": "arm64-64-Apple_M3",
+				},
 				"AppleIntel": {
+					"MacBookPro15.1": "x86-64",
 					"MacBookPro16.2": "x86-64",
 				},
 				"AVX": {
@@ -956,9 +984,11 @@ func (b *taskBuilder) defaultSwarmDimensions() {
 				},
 				"AVX2": {
 					"GCE":            "x86-64-Haswell_GCE",
+					"Golo":           "x86-64-E3-1230_v5",
 					"MacBookAir7.2":  "x86-64-i5-5350U",
 					"MacBookPro11.5": "x86-64-i7-4870HQ",
 					"MacMini7.1":     "x86-64-i5-4278U",
+					"MacMini8.1":     "x86-64-i7-8700B",
 					"NUC5i7RYH":      "x86-64-i7-5557U",
 					"NUC9i7QN":       "x86-64-i7-9750H",
 					"NUC11TZi5":      "x86-64-i5-1135G7",
@@ -992,9 +1022,7 @@ func (b *taskBuilder) defaultSwarmDimensions() {
 			// It's a GPU job.
 			if b.matchOs("Win") {
 				gpu, ok := map[string]string{
-					// At some point this might use the device ID, but for now it's like Chromebooks.
-					"GTX660":        "10de:11c0-26.21.14.4120",
-					"GTX960":        "10de:1401-32.0.15.6094",
+					"GTX1660":       "10de:2184-31.0.15.4601",
 					"IntelHD4400":   "8086:0a16-20.19.15.4963",
 					"IntelIris540":  "8086:1926-31.0.101.2115",
 					"IntelIris6100": "8086:162b-20.19.15.4963",
@@ -1004,10 +1032,16 @@ func (b *taskBuilder) defaultSwarmDimensions() {
 					"RadeonR9M470X": "1002:6646-26.20.13031.18002",
 					"QuadroP400":    "10de:1cb3-31.0.15.5222",
 					"RadeonVega6":   "1002:1636-31.0.14057.5006",
-					"RTX3060":       "10de:2489-32.0.15.6094",
+					"RadeonVega8":   "1002:1638-31.0.21916.2",
+					"RTX3060":       "10de:2489-32.0.15.7270",
 				}[b.parts["cpu_or_gpu_value"]]
 				if !ok {
 					log.Fatalf("Entry %q not found in Win GPU mapping.", b.parts["cpu_or_gpu_value"])
+				}
+				// TODO(borenet): Remove this block once these machines are all
+				// migrated.
+				if b.os("Win10") && b.parts["cpu_or_gpu_value"] == "RTX3060" {
+					gpu = "10de:2489-32.0.15.6094"
 				}
 				d["gpu"] = gpu
 			} else if b.isLinux() {
@@ -1020,9 +1054,10 @@ func (b *taskBuilder) defaultSwarmDimensions() {
 					"RTX3060":      "10de:2489-470.182.03",
 					"IntelIrisXe":  "8086:9a49",
 					"RadeonVega6":  "1002:1636",
+					"RadeonVega8":  "1002:1638-23.2.1",
 				}[b.parts["cpu_or_gpu_value"]]
 				if !ok {
-					log.Fatalf("Entry %q not found in Ubuntu GPU mapping.", b.parts["cpu_or_gpu_value"])
+					log.Fatalf("Entry %q not found in Linux GPU mapping.", b.parts["cpu_or_gpu_value"])
 				}
 				d["gpu"] = gpu
 
@@ -1038,12 +1073,14 @@ func (b *taskBuilder) defaultSwarmDimensions() {
 				}
 			} else if b.matchOs("Mac") {
 				gpu, ok := map[string]string{
-					"AppleM1":       "AppleM1",
-					"IntelHD6000":   "8086:1626",
-					"IntelHD615":    "8086:591e",
-					"IntelIris5100": "8086:0a2e",
-					"IntelIrisPlus": "8086:8a53",
-					"RadeonHD8870M": "1002:6821-4.0.20-3.2.8",
+					"AppleM1":             "AppleM1",
+					"AppleM3":             "apple:m3",
+					"IntelHD6000":         "8086:1626",
+					"IntelHD615":          "8086:591e",
+					"IntelIris5100":       "8086:0a2e",
+					"IntelIrisPlus":       "8086:8a53",
+					"IntelUHDGraphics630": "8086:3e9b",
+					"RadeonHD8870M":       "1002:6821-4.0.20-3.2.8",
 				}[b.parts["cpu_or_gpu_value"]]
 				if !ok {
 					log.Fatalf("Entry %q not found in Mac GPU mapping.", b.parts["cpu_or_gpu_value"])
@@ -1082,19 +1119,41 @@ func (b *taskBuilder) defaultSwarmDimensions() {
 				log.Fatalf("Unknown GPU mapping for OS %q.", b.parts["os"])
 			}
 		}
-	} else {
-		if d["os"] == DEBIAN_11_OS {
-			// The Debian11 compile machines in the skolo have
-			// GPUs, but we still use them for compiles also.
-
-			// Dodge Raspberry Pis.
-			d["cpu"] = "x86-64"
-			// Target the AMDRyzen 5 4500U machines, as they are beefy and we have
-			// 19 of them, and they are setup to compile.
-			d["gpu"] = "1002:1636"
-		} else {
-			d["gpu"] = "none"
+		if b.matchOs("Mac") {
+			// TODO(borenet): Remove empty and nested entries after all Macs
+			// are migrated to the new lab.
+			if macModel, ok := map[string]interface{}{
+				"MacBookAir7.2":  "",
+				"MacBookPro11.5": "MacBookPro11,5",
+				"MacBookPro15.1": "MacBookPro15,1",
+				"MacBookPro15.3": "Mac15,3",
+				"MacBookPro16.2": "",
+				"MacMini7.1":     "",
+				"MacMini8.1":     "Macmini8,1",
+				"MacMini9.1": map[string]string{
+					"Mac12": "",
+					"Mac13": "",
+					"Mac14": "Macmini9,1",
+				},
+				// TODO(borenet): This is currently resolving to multiple
+				// different actual device types.
+				"VMware7.1": "",
+			}[b.parts["model"]]; ok {
+				if macModel != "" {
+					macModelDim, ok := macModel.(string)
+					if !ok {
+						macModelDim = macModel.(map[string]string)[b.parts["os"]]
+					}
+					if macModelDim != "" {
+						d["mac_model"] = macModelDim
+					}
+				}
+			} else {
+				log.Fatalf("No mac_model found for %q", b.parts["model"])
+			}
 		}
+	} else {
+		d["gpu"] = "none"
 		if d["os"] == DEFAULT_OS_LINUX_GCE {
 			if b.extraConfig("CanvasKit", "CMake", "Docker", "PathKit") || b.role("BuildStats", "CodeSize") {
 				b.linuxGceDimensions(MACHINE_TYPE_MEDIUM)
@@ -1246,10 +1305,14 @@ func (b *taskBuilder) maybeAddIosDevImage() {
 				asset = "ios-dev-image-13.5"
 			case "13.6":
 				asset = "ios-dev-image-13.6"
+			case "18.2.1":
+				// Newer iOS versions don't use a pre-packaged dev image.
 			default:
 				log.Fatalf("Unable to determine correct ios-dev-image asset for %s. If %s is a new iOS release, you must add a CIPD package containing the corresponding iOS dev image; see ios-dev-image-11.4 for an example.", b.Name, m[1])
 			}
-			b.asset(asset)
+			if asset != "" {
+				b.asset(asset)
+			}
 			break
 		} else if strings.Contains(dim, "iOS") {
 			log.Fatalf("Must specify iOS version for %s to obtain correct dev image; os dimension is missing version: %s", b.Name, dim)
@@ -1312,6 +1375,11 @@ func (b *jobBuilder) compile() string {
 				} else if b.arch("arm") {
 					b.asset("armhf_sysroot")
 					b.asset("chromebook_arm_gles")
+				} else if b.arch("arm64") {
+					b.asset("arm64_sysroot")
+					b.asset("chromebook_arm64_gles")
+				} else {
+					panic(fmt.Sprintf("Unknown arch %q for Chromebook", b.parts["arch"]))
 				}
 			} else if b.isLinux() {
 				if b.compiler("Clang") {
@@ -1342,7 +1410,7 @@ func (b *jobBuilder) compile() string {
 				})
 				b.asset("ccache_mac")
 				b.usesCCache()
-				if b.extraConfig("iOS") {
+				if b.matchExtraConfig("iOS.*") {
 					b.asset("provisioning_profile_ios")
 				}
 				if b.shellsOutToBazel() {
@@ -1393,7 +1461,7 @@ func (b *jobBuilder) recreateSKPs() {
 		)
 		b.usesGo()
 		b.cache(CACHES_WORKDIR...)
-		b.timeout(6 * time.Hour)
+		b.timeout(8 * time.Hour)
 		b.usesPython()
 		b.attempts(2)
 	})
@@ -1626,6 +1694,9 @@ func (b *jobBuilder) codesize() {
 
 // doUpload indicates whether the given Job should upload its results.
 func (b *jobBuilder) doUpload() bool {
+	if b.extraConfig("Upload") {
+		return true
+	}
 	for _, s := range b.cfg.NoUpload {
 		m, err := regexp.MatchString(s, b.Name)
 		if err != nil {
@@ -1730,6 +1801,12 @@ func (b *jobBuilder) dm() {
 				b.directUpload(b.cfg.GsBucketGm, b.cfg.ServiceAccountUploadGM)
 				directUpload = true
 			}
+			if b.matchOs("iOS") {
+				b.Spec.Caches = append(b.Spec.Caches, &specs.Cache{
+					Name: "xcode",
+					Path: "cache/Xcode.app",
+				})
+			}
 		}
 		b.recipeProp("gold_hashes_url", b.cfg.GoldHashesURL)
 		b.recipeProps(EXTRA_PROPS)
@@ -1782,7 +1859,7 @@ func (b *jobBuilder) dm() {
 		} else if b.arch("x86") && b.debug() {
 			// skia:6737
 			b.timeout(6 * time.Hour)
-		} else if b.matchOs("Mac11") {
+		} else if b.matchOs("Mac14") {
 			b.timeout(30 * time.Minute)
 		}
 		b.maybeAddIosDevImage()
@@ -1957,6 +2034,14 @@ func (b *jobBuilder) perf() {
 		} else if b.extraConfig("LottieWeb") {
 			recipe = "perf_skottiewasm_lottieweb"
 			cas = CAS_LOTTIE_WEB
+		} else if b.matchOs("iOS") {
+			// We need a service account in order to download the xcode CIPD
+			// packages.
+			b.serviceAccount(b.cfg.ServiceAccountUploadNano)
+			b.Spec.Caches = append(b.Spec.Caches, &specs.Cache{
+				Name: "xcode",
+				Path: "cache/Xcode.app",
+			})
 		}
 		b.recipeProps(EXTRA_PROPS)
 		if recipe == "perf" {
@@ -1987,7 +2072,7 @@ func (b *jobBuilder) perf() {
 		} else if b.parts["arch"] == "x86" && b.parts["configuration"] == "Debug" {
 			// skia:6737
 			b.timeout(6 * time.Hour)
-		} else if b.matchOs("Mac11") {
+		} else if b.matchOs("Mac14") {
 			b.timeout(30 * time.Minute)
 		}
 
@@ -2151,6 +2236,7 @@ var shorthandToLabel = map[string]labelAndSavedOutputDir{
 	"core":                       {"//:core", ""},
 	"cpu_8888_benchmark_test":    {"//bench:cpu_8888_test", ""},
 	"cpu_gms":                    {"//gm:cpu_gm_tests", ""},
+	"dm":                         {"//dm", ""},
 	"full_library":               {"//tools:full_build", ""},
 	"ganesh_gl":                  {"//:ganesh_gl", ""},
 	"hello_bazel_world_test":     {"//gm:hello_bazel_world_test", ""},
@@ -2170,6 +2256,7 @@ var shorthandToLabel = map[string]labelAndSavedOutputDir{
 	"use_skresources":            {"//example/external_client:use_skresources", ""},
 	"write_text_to_png":          {"//example/external_client:write_text_to_png", ""},
 	"write_to_pdf":               {"//example/external_client:write_to_pdf", ""},
+	"play_skottie":               {"//example/external_client:play_skottie", ""},
 
 	// Currently there is no way to tell Bazel "only test go_test targets", so we must group them
 	// under a test_suite.

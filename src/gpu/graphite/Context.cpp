@@ -91,14 +91,16 @@ Context::Context(sk_sp<SharedContext> sharedContext,
     // SingleOwner object and it is declared last
     fResourceProvider = fSharedContext->makeResourceProvider(&fSingleOwner,
                                                              SK_InvalidGenID,
-                                                             options.fGpuBudgetInBytes,
-                                                             /* avoidBufferAlloc= */ false);
+                                                             options.fGpuBudgetInBytes);
     fMappedBufferManager = std::make_unique<ClientMappedBufferManager>(this->contextID());
 #if defined(GPU_TEST_UTILS)
     if (options.fOptionsPriv) {
         fStoreContextRefInRecorder = options.fOptionsPriv->fStoreContextRefInRecorder;
     }
 #endif
+
+    fSharedContext->globalCache()->setPipelineCallback(options.fPipelineCallback,
+                                                       options.fPipelineCallbackContext);
 }
 
 Context::~Context() {
@@ -208,7 +210,10 @@ struct Context::AsyncParams {
         if (!fSrcImage) {
             return false;
         }
-        if (fSrcImage->isProtected()) {
+        // SkImage::isProtected() -> bool, TextureProxy::isProtected() -> Protected enum.
+        // The explicit cast makes this function work for both template instantiations since
+        // the Protected enum is backed by a bool.
+        if ((bool) fSrcImage->isProtected()) {
             return false;
         }
         if (!SkIRect::MakeSize(fSrcImage->dimensions()).contains(fSrcRect)) {
@@ -759,6 +764,8 @@ void Context::checkForFinishedWork(SyncToCpu syncToCpu) {
 
     fQueueManager->checkForFinishedWork(syncToCpu);
     fMappedBufferManager->process();
+    // Process the return queue periodically to make sure it doesn't get too big
+    fResourceProvider->forceProcessReturnedResources();
 }
 
 void Context::checkAsyncWorkCompletion() {
@@ -804,6 +811,11 @@ size_t Context::currentPurgeableBytes() const {
 size_t Context::maxBudgetedBytes() const {
     ASSERT_SINGLE_OWNER
     return fResourceProvider->getResourceCacheLimit();
+}
+
+void Context::setMaxBudgetedBytes(size_t bytes) {
+    ASSERT_SINGLE_OWNER
+    return fResourceProvider->setResourceCacheLimit(bytes);
 }
 
 void Context::dumpMemoryStatistics(SkTraceMemoryDump* traceMemoryDump) const {

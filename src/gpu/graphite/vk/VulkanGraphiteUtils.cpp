@@ -5,14 +5,16 @@
  * found in the LICENSE file.
  */
 
-#include "include/gpu/graphite/vk/VulkanGraphiteUtils.h"
-#include "src/gpu/graphite/vk/VulkanGraphiteUtilsPriv.h"
+#include "src/gpu/graphite/vk/VulkanGraphiteUtils.h"
 
+#include "include/core/SkStream.h"
 #include "include/gpu/ShaderErrorHandler.h"
 #include "include/gpu/graphite/Context.h"
 #include "include/gpu/vk/VulkanBackendContext.h"
 #include "src/core/SkTraceEvent.h"
 #include "src/gpu/graphite/ContextPriv.h"
+#include "src/gpu/graphite/RenderPassDesc.h"
+#include "src/gpu/graphite/TextureFormat.h"
 #include "src/gpu/graphite/vk/VulkanQueueManager.h"
 #include "src/gpu/graphite/vk/VulkanSampler.h"
 #include "src/gpu/graphite/vk/VulkanSharedContext.h"
@@ -72,6 +74,8 @@ VkShaderModule createVulkanShaderModule(const VulkanSharedContext* context,
 void DescriptorDataToVkDescSetLayout(const VulkanSharedContext* ctxt,
                                      const SkSpan<DescriptorData>& requestedDescriptors,
                                      VkDescriptorSetLayout* outLayout) {
+    // If requestedDescriptors is empty, that simply means we should create an empty placeholder
+    // layout that doesn't actually contain any descriptors.
     skia_private::STArray<kDescriptorTypeCount, VkDescriptorSetLayoutBinding> bindingLayouts;
     for (size_t i = 0; i < requestedDescriptors.size(); i++) {
         if (requestedDescriptors[i].fCount != 0) {
@@ -96,7 +100,7 @@ void DescriptorDataToVkDescSetLayout(const VulkanSharedContext* ctxt,
     layoutCreateInfo.pNext = nullptr;
     layoutCreateInfo.flags = 0;
     layoutCreateInfo.bindingCount = bindingLayouts.size();
-    layoutCreateInfo.pBindings = &bindingLayouts.front();
+    layoutCreateInfo.pBindings = bindingLayouts.data();
 
     VkResult result;
     VULKAN_CALL_RESULT(
@@ -127,38 +131,51 @@ VkDescriptorType DsTypeEnumToVkDs(DescriptorType type) {
     SkUNREACHABLE;
 }
 
-bool vkFormatIsSupported(VkFormat format) {
+TextureFormat VkFormatToTextureFormat(VkFormat format) {
     switch (format) {
-        case VK_FORMAT_R8G8B8A8_UNORM:
-        case VK_FORMAT_B8G8R8A8_UNORM:
-        case VK_FORMAT_R8G8B8A8_SRGB:
-        case VK_FORMAT_R8G8B8_UNORM:
-        case VK_FORMAT_R8G8_UNORM:
-        case VK_FORMAT_A2B10G10R10_UNORM_PACK32:
-        case VK_FORMAT_A2R10G10B10_UNORM_PACK32:
-        case VK_FORMAT_R5G6B5_UNORM_PACK16:
-        case VK_FORMAT_B4G4R4A4_UNORM_PACK16:
-        case VK_FORMAT_R4G4B4A4_UNORM_PACK16:
-        case VK_FORMAT_R8_UNORM:
-        case VK_FORMAT_ETC2_R8G8B8_UNORM_BLOCK:
-        case VK_FORMAT_BC1_RGB_UNORM_BLOCK:
-        case VK_FORMAT_BC1_RGBA_UNORM_BLOCK:
-        case VK_FORMAT_R16G16B16A16_SFLOAT:
-        case VK_FORMAT_R16_SFLOAT:
-        case VK_FORMAT_R16_UNORM:
-        case VK_FORMAT_R16G16_UNORM:
-        case VK_FORMAT_G8_B8_R8_3PLANE_420_UNORM:
-        case VK_FORMAT_G8_B8R8_2PLANE_420_UNORM:
-        case VK_FORMAT_R16G16B16A16_UNORM:
-        case VK_FORMAT_R16G16_SFLOAT:
-        case VK_FORMAT_S8_UINT:
-        case VK_FORMAT_D16_UNORM:
-        case VK_FORMAT_D32_SFLOAT:
-        case VK_FORMAT_D24_UNORM_S8_UINT:
-        case VK_FORMAT_D32_SFLOAT_S8_UINT:
-            return true;
-        default:
-            return false;
+        case VK_FORMAT_R8_UNORM:                  return TextureFormat::kR8;
+        case VK_FORMAT_R16_UNORM:                 return TextureFormat::kR16;
+        case VK_FORMAT_R16_SFLOAT:                return TextureFormat::kR16F;
+        case VK_FORMAT_R32_SFLOAT:                return TextureFormat::kR32F;
+        case VK_FORMAT_R8G8_UNORM:                return TextureFormat::kRG8;
+        case VK_FORMAT_R16G16_UNORM:              return TextureFormat::kRG16;
+        case VK_FORMAT_R16G16_SFLOAT:             return TextureFormat::kRG16F;
+        case VK_FORMAT_R32G32_SFLOAT:             return TextureFormat::kRG32F;
+        case VK_FORMAT_R8G8B8_UNORM:              return TextureFormat::kRGB8;
+        case VK_FORMAT_B8G8R8_UNORM:              return TextureFormat::kBGR8;
+        case VK_FORMAT_R5G6B5_UNORM_PACK16:       return TextureFormat::kB5_G6_R5;
+        case VK_FORMAT_B5G6R5_UNORM_PACK16:       return TextureFormat::kR5_G6_B5;
+        case VK_FORMAT_R16G16B16_UNORM:           return TextureFormat::kRGB16;
+        case VK_FORMAT_R16G16B16_SFLOAT:          return TextureFormat::kRGB16F;
+        case VK_FORMAT_R32G32B32_SFLOAT:          return TextureFormat::kRGB32F;
+        case VK_FORMAT_R8G8B8_SRGB:               return TextureFormat::kRGB8_sRGB;
+        case VK_FORMAT_R8G8B8A8_UNORM:            return TextureFormat::kRGBA8;
+        case VK_FORMAT_A8B8G8R8_UNORM_PACK32:     return TextureFormat::kRGBA8;
+        case VK_FORMAT_R16G16B16A16_UNORM:        return TextureFormat::kRGBA16;
+        case VK_FORMAT_R16G16B16A16_SFLOAT:       return TextureFormat::kRGBA16F;
+        case VK_FORMAT_R32G32B32A32_SFLOAT:       return TextureFormat::kRGBA32F;
+        case VK_FORMAT_A2B10G10R10_UNORM_PACK32:  return TextureFormat::kRGB10_A2;
+        case VK_FORMAT_R8G8B8A8_SRGB:             return TextureFormat::kRGBA8_sRGB;
+        case VK_FORMAT_B8G8R8A8_UNORM:            return TextureFormat::kBGRA8;
+        case VK_FORMAT_A2R10G10B10_UNORM_PACK32:  return TextureFormat::kBGR10_A2;
+        case VK_FORMAT_B8G8R8A8_SRGB:             return TextureFormat::kBGRA8_sRGB;
+        case VK_FORMAT_R4G4B4A4_UNORM_PACK16:     return TextureFormat::kABGR4;
+        case VK_FORMAT_B4G4R4A4_UNORM_PACK16:     return TextureFormat::kARGB4;
+        case VK_FORMAT_ETC2_R8G8B8_UNORM_BLOCK:   return TextureFormat::kRGB8_ETC2;
+        case VK_FORMAT_ETC2_R8G8B8_SRGB_BLOCK:    return TextureFormat::kRGB8_ETC2_sRGB;
+        case VK_FORMAT_BC1_RGB_UNORM_BLOCK:       return TextureFormat::kRGB8_BC1;
+        case VK_FORMAT_BC1_RGBA_UNORM_BLOCK:      return TextureFormat::kRGBA8_BC1;
+        case VK_FORMAT_BC1_RGBA_SRGB_BLOCK:       return TextureFormat::kRGBA8_BC1_sRGB;
+        case VK_FORMAT_G8_B8R8_2PLANE_420_UNORM:  return TextureFormat::kYUV8_P2_420;
+        case VK_FORMAT_G8_B8_R8_3PLANE_420_UNORM: return TextureFormat::kYUV8_P3_420;
+        case VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16:
+            return TextureFormat::kYUV10x6_P2_420;
+        case VK_FORMAT_S8_UINT:                   return TextureFormat::kS8;
+        case VK_FORMAT_D16_UNORM:                 return TextureFormat::kD16;
+        case VK_FORMAT_D32_SFLOAT:                return TextureFormat::kD32F;
+        case VK_FORMAT_D24_UNORM_S8_UINT:         return TextureFormat::kD24_S8;
+        case VK_FORMAT_D32_SFLOAT_S8_UINT:        return TextureFormat::kD32F_S8;
+        default:                                  return TextureFormat::kUnsupported;
     }
 }
 
@@ -177,43 +194,9 @@ VkShaderStageFlags PipelineStageFlagsToVkShaderStageFlags(
     return vkStageFlags;
 }
 
-namespace ycbcrPackaging {
-uint32_t nonFormatInfoAsUInt32(const VulkanYcbcrConversionInfo& conversionInfo) {
-    static_assert(kComponentAShift + kComponentBits <= 32);
-
-    SkASSERT(conversionInfo.fYcbcrModel                  < (1u << kYcbcrModelBits        ));
-    SkASSERT(conversionInfo.fYcbcrRange                  < (1u << kYcbcrRangeBits        ));
-    SkASSERT(conversionInfo.fXChromaOffset               < (1u << kXChromaOffsetBits     ));
-    SkASSERT(conversionInfo.fYChromaOffset               < (1u << kYChromaOffsetBits     ));
-    SkASSERT(conversionInfo.fChromaFilter                < (1u << kChromaFilterBits      ));
-    SkASSERT(conversionInfo.fForceExplicitReconstruction < (1u << kForceExplicitReconBits));
-    SkASSERT(conversionInfo.fComponents.r                < (1u << kComponentBits         ));
-    SkASSERT(conversionInfo.fComponents.g                < (1u << kComponentBits         ));
-    SkASSERT(conversionInfo.fComponents.b                < (1u << kComponentBits         ));
-    SkASSERT(conversionInfo.fComponents.a                < (1u << kComponentBits         ));
-
-    bool usesExternalFormat = conversionInfo.fFormat == VK_FORMAT_UNDEFINED;
-
-    return (((uint32_t)(usesExternalFormat                         ) << kUsesExternalFormatShift) |
-            ((uint32_t)(conversionInfo.fYcbcrModel                 ) << kYcbcrModelShift        ) |
-            ((uint32_t)(conversionInfo.fYcbcrRange                 ) << kYcbcrRangeShift        ) |
-            ((uint32_t)(conversionInfo.fXChromaOffset              ) << kXChromaOffsetShift     ) |
-            ((uint32_t)(conversionInfo.fYChromaOffset              ) << kYChromaOffsetShift     ) |
-            ((uint32_t)(conversionInfo.fChromaFilter               ) << kChromaFilterShift      ) |
-            ((uint32_t)(conversionInfo.fForceExplicitReconstruction) << kForceExplicitReconShift) |
-            ((uint32_t)(conversionInfo.fComponents.r               ) << kComponentRShift        ) |
-            ((uint32_t)(conversionInfo.fComponents.g               ) << kComponentGShift        ) |
-            ((uint32_t)(conversionInfo.fComponents.b               ) << kComponentBShift        ) |
-            ((uint32_t)(conversionInfo.fComponents.a               ) << kComponentAShift        ));
+bool RenderPassDescWillLoadMSAAFromResolve(const RenderPassDesc& renderPassDesc) {
+    return renderPassDesc.fColorResolveAttachment.fTextureInfo.isValid() &&
+           renderPassDesc.fColorResolveAttachment.fLoadOp == LoadOp::kLoad;
 }
-
-int numInt32sNeeded(const VulkanYcbcrConversionInfo& conversionInfo) {
-    if (!conversionInfo.isValid()) {
-        return 0;
-    }
-    return conversionInfo.fFormat == VK_FORMAT_UNDEFINED ? SamplerDesc::kInt32sNeededExternalFormat
-                                                         : SamplerDesc::kInt32sNeededKnownFormat;
-}
-} // namespace ycbcrPackaging
 
 } // namespace skgpu::graphite

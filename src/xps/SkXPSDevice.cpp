@@ -983,7 +983,7 @@ HRESULT SkXPSDevice::createXpsBrush(const SkPaint& skPaint,
     if (shaderBase->type() == SkShaderBase::ShaderType::kColor) {
         auto colorShader = static_cast<const SkColorShader*>(shader);
         SkAlpha alpha = skPaint.getAlpha();
-        HR(this->createXpsSolidColorBrush(colorShader->color(), alpha, brush));
+        HR(this->createXpsSolidColorBrush(colorShader->color().toSkColor(), alpha, brush));
         return S_OK;
     } else if (shaderBase->type() == SkShaderBase::ShaderType::kGradientBase) {
         SkShaderBase::GradientInfo info;
@@ -1959,7 +1959,7 @@ void SkXPSDevice::drawDevice(SkDevice* dev, const SkSamplingOptions&, const SkPa
     SkASSERT(that->fTopTypefaces == this->fTopTypefaces);
 
     SkTScopedComPtr<IXpsOMMatrixTransform> xpsTransform;
-    HRVM(this->createXpsTransform(dev->getRelativeTransform(*this), &xpsTransform),
+    HRVM(this->createXpsTransform(dev->getRelativeTransform(*this).asM33(), &xpsTransform),
          "Could not create layer transform.");
     HRVM(that->fCurrentXpsCanvas->SetTransformLocal(xpsTransform.get()),
          "Could not set layer transform.");

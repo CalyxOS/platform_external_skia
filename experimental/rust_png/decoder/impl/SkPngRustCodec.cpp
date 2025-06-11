@@ -23,6 +23,7 @@
 #include "src/base/SkAutoMalloc.h"
 #include "src/base/SkSafeMath.h"
 #include "src/codec/SkFrameHolder.h"
+#include "src/codec/SkParseEncodedOrigin.h"
 #include "src/codec/SkSwizzler.h"
 #include "src/core/SkRasterPipeline.h"
 #include "src/core/SkRasterPipelineOpList.h"
@@ -144,10 +145,19 @@ std::unique_ptr<SkEncodedInfo::ICCProfile> CreateColorProfile(const rust_png::Re
         return nullptr;
     }
 
-    // Default to SRGB gamut.
-    skcms_Matrix3x3 toXYZD50 = skcms_sRGB_profile()->toXYZD50;
-
-    // Next, check for chromaticities.
+    // Next, check for presence of `gAMA` and `cHRM` chunks.
+    float gamma = 0.0;
+    const bool got_gamma = reader.try_get_gama(gamma);
+    if (!got_gamma) {
+        // We ignore whether `chRM` is present or not.
+        //
+        // This preserves the behavior decided in Chromium's 83587041dc5f1428c09
+        // (https://codereview.chromium.org/2469473002).  The PNG spec states
+        // that cHRM is valid even without gAMA but we cannot apply the cHRM
+        // without guessing a gAMA.  Color correction is not a guessing game,
+        // so we match the behavior of Safari and Firefox instead (compat).
+        return nullptr;
+    }
     float rx = 0.0;
     float ry = 0.0;
     float gx = 0.0;
@@ -156,33 +166,45 @@ std::unique_ptr<SkEncodedInfo::ICCProfile> CreateColorProfile(const rust_png::Re
     float by = 0.0;
     float wx = 0.0;
     float wy = 0.0;
-    if (reader.try_get_chrm(wx, wy, rx, ry, gx, gy, bx, by)) {
-        skcms_Matrix3x3 tmp;
-        if (skcms_PrimariesToXYZD50(rx, ry, gx, gy, bx, by, wx, wy, &tmp)) {
-            toXYZD50 = tmp;
-        } else {
-            // Note that Blink simply returns nullptr in this case. We'll fall
-            // back to srgb.
-            //
-            // TODO(https://crbug.com/362306048): If this implementation ends up
-            // replacing the one from Blink, then we should 1) double-check that
-            // we are comfortable with the difference and 2) remove this comment
-            // (since the Blink code that it refers to will get removed).
+    const bool got_chrm = reader.try_get_chrm(wx, wy, rx, ry, gx, gy, bx, by);
+    if (!got_chrm) {
+        // If there is no `cHRM` chunk then check if `gamma` is neutral (in PNG
+        // / `SkNamedTransferFn::k2Dot2` sense).  `kPngGammaThreshold` mimics
+        // `PNG_GAMMA_THRESHOLD_FIXED` from `libpng`.
+        constexpr float kPngGammaThreshold = 0.05f;
+        constexpr float kMinNeutralValue = 1.0f - kPngGammaThreshold;
+        constexpr float kMaxNeutralValue = 1.0f + kPngGammaThreshold;
+        float tmp = gamma * 2.2f;
+        bool is_neutral = kMinNeutralValue < tmp && tmp < kMaxNeutralValue;
+        if (is_neutral) {
+            // Don't construct a custom color profile if the only encoded color
+            // space information is a "neutral" gamma.  This is primarily needed
+            // for correctness (see // https://crbug.com/388025081), but may
+            // also help with performance (using a slightly more direct
+            // `SkSwizzler` instead of `skcms_Transform`).
+            return nullptr;
         }
     }
 
-    skcms_TransferFunction fn;
-    float gamma;
-    if (reader.try_get_gama(gamma)) {
-        fn.a = 1.0f;
-        fn.b = fn.c = fn.d = fn.e = fn.f = 0.0f;
-        fn.g = 1.0f / gamma;
+    // Construct a color profile based on `cHRM` and `gAMA` chunks.
+    skcms_Matrix3x3 toXYZD50;
+    if (got_chrm) {
+        if (!skcms_PrimariesToXYZD50(rx, ry, gx, gy, bx, by, wx, wy, &toXYZD50)) {
+            return nullptr;
+        }
     } else {
-        // Default to sRGB gamma if the image has color space information,
-        // but does not specify gamma.
-        // Note that Blink would again return nullptr in this case.
-        fn = *skcms_sRGB_TransferFunction();
+        // `blink::PNGImageDecoder` returns a null color profile when `gAMA` is
+        // present without `cHRM`.  We fall back to the sRGB profile instead
+        // because we do gamma correction via `skcms_Transform` (rather than
+        // relying on `libpng` gamma correction as the legacy Blink decoder does
+        // in this scenario).
+        toXYZD50 = skcms_sRGB_profile()->toXYZD50;
     }
+
+    skcms_TransferFunction fn;
+    fn.a = 1.0f;
+    fn.b = fn.c = fn.d = fn.e = fn.f = 0.0f;
+    fn.g = 1.0f / gamma;
 
     skcms_ICCProfile profile;
     skcms_Init(&profile);
@@ -217,6 +239,7 @@ SkCodec::Result ToSkCodecResult(rust_png::DecodingResult rustResult) {
             return SkCodec::kErrorInInput;
         case rust_png::DecodingResult::ParameterError:
             return SkCodec::kInvalidParameters;
+        case rust_png::DecodingResult::OtherIoError:
         case rust_png::DecodingResult::LimitsExceededError:
             return SkCodec::kInternalError;
         case rust_png::DecodingResult::IncompleteInput:
@@ -226,30 +249,106 @@ SkCodec::Result ToSkCodecResult(rust_png::DecodingResult rustResult) {
 }
 
 // This helper class adapts `SkStream` to expose the API required by Rust FFI
-// (i.e. the `ReadTrait` API).
-class ReadTraitAdapterForSkStream final : public rust_png::ReadTrait {
+// (i.e. the `ReadAndSeekTraits` API).
+class ReadAndSeekTraitsAdapterForSkStream final : public rust_png::ReadAndSeekTraits {
 public:
     // SAFETY: The caller needs to guarantee that `stream` will be alive for
-    // as long as `ReadTraitAdapterForSkStream`.
-    explicit ReadTraitAdapterForSkStream(SkStream* stream) : fStream(stream) { SkASSERT(fStream); }
+    // as long as `ReadAndSeekTraitsAdapterForSkStream`.
+    explicit ReadAndSeekTraitsAdapterForSkStream(SkStream* stream) : fStream(stream) {
+        SkASSERT(fStream);
+    }
 
-    ~ReadTraitAdapterForSkStream() override = default;
+    ~ReadAndSeekTraitsAdapterForSkStream() override = default;
 
     // Non-copyable and non-movable (we want a stable `this` pointer, because we
-    // will be passing a `ReadTrait*` pointer over the FFI boundary and
+    // will be passing a `ReadAndSeekTraits*` pointer over the FFI boundary and
     // retaining it inside `png::Reader`).
-    ReadTraitAdapterForSkStream(const ReadTraitAdapterForSkStream&) = delete;
-    ReadTraitAdapterForSkStream& operator=(const ReadTraitAdapterForSkStream&) = delete;
-    ReadTraitAdapterForSkStream(ReadTraitAdapterForSkStream&&) = delete;
-    ReadTraitAdapterForSkStream& operator=(ReadTraitAdapterForSkStream&&) = delete;
+    ReadAndSeekTraitsAdapterForSkStream(const ReadAndSeekTraitsAdapterForSkStream&) = delete;
+    ReadAndSeekTraitsAdapterForSkStream& operator=(const ReadAndSeekTraitsAdapterForSkStream&) =
+            delete;
+    ReadAndSeekTraitsAdapterForSkStream(ReadAndSeekTraitsAdapterForSkStream&&) = delete;
+    ReadAndSeekTraitsAdapterForSkStream& operator=(ReadAndSeekTraitsAdapterForSkStream&&) = delete;
 
-    // Implementation of the `std::io::Read::read` method.  See `RustTrait`'s
-    // doc comments and
+    // Implementation of the `std::io::Read::read` method.  See Rust trait's
+    // doc comments at
     // https://doc.rust-lang.org/nightly/std/io/trait.Read.html#tymethod.read
     // for guidance on the desired implementation and behavior of this method.
     size_t read(rust::Slice<uint8_t> buffer) override {
         SkSpan<uint8_t> span = ToSkSpan(buffer);
         return fStream->read(span.data(), span.size());
+    }
+
+    // Implementation of the `std::io::Seek::seek` method.  See Rust trait`'s
+    // doc comments at
+    // https://doc.rust-lang.org/beta/std/io/trait.Seek.html#tymethod.seek
+    // for guidance on the desired implementation and behavior of these methods.
+    bool seek_from_start(uint64_t requestedPos, uint64_t& finalPos) override {
+        SkSafeMath safe;
+        size_t pos = safe.castTo<size_t>(requestedPos);
+        if (!safe.ok()) {
+            return false;
+        }
+
+        if (!fStream->seek(pos)) {
+            return false;
+        }
+        SkASSERT(!fStream->hasPosition() || fStream->getPosition() == requestedPos);
+
+        // Assigning `size_t` to `uint64_t` doesn't need to go through
+        // `SkSafeMath`, because `uint64_t` is never smaller than `size_t`.
+        static_assert(sizeof(uint64_t) >= sizeof(size_t));
+        finalPos = requestedPos;
+
+        return true;
+    }
+    bool seek_from_end(int64_t requestedOffset, uint64_t& finalPos) override {
+        if (!fStream->hasLength()) {
+            return false;
+        }
+        size_t length = fStream->getLength();
+
+        SkSafeMath safe;
+        uint64_t endPos = safe.castTo<uint64_t>(length);
+        if (requestedOffset > 0) {
+            // IIUC `SkStream` doesn't support reading beyond the current
+            // length.
+            return false;
+        }
+        if (requestedOffset == std::numeric_limits<int64_t>::min()) {
+            // `-requestedOffset` below wouldn't work.
+            return false;
+        }
+        uint64_t offset = safe.castTo<uint64_t>(-requestedOffset);
+        if (!safe.ok()) {
+            return false;
+        }
+        if (offset > endPos) {
+            // `endPos - offset` below wouldn't work.
+            return false;
+        }
+
+        return this->seek_from_start(endPos - offset, finalPos);
+    }
+    bool seek_relative(int64_t requestedOffset, uint64_t& finalPos) override {
+        if (!fStream->hasPosition()) {
+            return false;
+        }
+
+        SkSafeMath safe;
+        long offset = safe.castTo<long>(requestedOffset);
+        if (!safe.ok()) {
+            return false;
+        }
+
+        if (!fStream->move(offset)) {
+            return false;
+        }
+
+        finalPos = safe.castTo<uint64_t>(fStream->getPosition());
+        if (!safe.ok()) {
+            return false;
+        }
+        return true;
     }
 
 private:
@@ -305,6 +404,18 @@ void blendAllRows(SkSpan<uint8_t> dstFrame,
     }
 }
 
+SkEncodedOrigin GetEncodedOrigin(const rust_png::Reader& reader) {
+    if (reader.has_exif_chunk()) {
+        rust::Slice<const uint8_t> rust_slice = reader.get_exif_chunk();
+        SkEncodedOrigin origin;
+        if (SkParseEncodedOrigin(rust_slice.data(), rust_slice.size(), &origin)) {
+            return origin;
+        }
+    }
+
+    return kTopLeft_SkEncodedOrigin;
+}
+
 }  // namespace
 
 // static
@@ -313,9 +424,9 @@ std::unique_ptr<SkPngRustCodec> SkPngRustCodec::MakeFromStream(std::unique_ptr<S
     SkASSERT(stream);
     SkASSERT(result);
 
-    auto readTraitAdapter = std::make_unique<ReadTraitAdapterForSkStream>(stream.get());
+    auto inputAdapter = std::make_unique<ReadAndSeekTraitsAdapterForSkStream>(stream.get());
     rust::Box<rust_png::ResultOfReader> resultOfReader =
-            rust_png::new_reader(std::move(readTraitAdapter));
+            rust_png::new_reader(std::move(inputAdapter));
     *result = ToSkCodecResult(resultOfReader->err());
     if (*result != kSuccess) {
         return nullptr;
@@ -333,7 +444,8 @@ SkPngRustCodec::SkPngRustCodec(SkEncodedInfo&& encodedInfo,
                          // TODO(https://crbug.com/370522089): If/when `SkCodec` can
                          // avoid unnecessary rewinding, then stop "hiding" our stream
                          // from it.
-                         /* stream = */ nullptr)
+                         /* stream = */ nullptr,
+                         GetEncodedOrigin(*reader))
         , fReader(std::move(reader))
         , fPrivStream(std::move(stream))
         , fFrameHolder(encodedInfo.width(), encodedInfo.height()) {
@@ -389,9 +501,10 @@ SkCodec::Result SkPngRustCodec::seekToStartOfFrame(int index) {
             return kCouldNotRewind;
         }
 
-        auto readTraitAdapter = std::make_unique<ReadTraitAdapterForSkStream>(fPrivStream.get());
+        auto inputAdapter =
+                std::make_unique<ReadAndSeekTraitsAdapterForSkStream>(fPrivStream.get());
         rust::Box<rust_png::ResultOfReader> resultOfReader =
-                rust_png::new_reader(std::move(readTraitAdapter));
+                rust_png::new_reader(std::move(inputAdapter));
 
         // `SkPngRustCodec` constructor must have run before, and the
         // constructor got a successfully created reader - we therefore also
@@ -529,7 +642,7 @@ void SkPngRustCodec::expandDecodedInterlacedRow(SkSpan<uint8_t> dstFrame,
     // `applyXformRow` requires full-width rows as input (can't change
     // `SkSwizzler::fSrcWidth` after `initializeXforms`).
     //
-    // TODO(https://crbug.com/357876243): Having `Reader.read_row` API (see
+    // TODO(https://crbug.com/399891492): Having `Reader.read_row` API (see
     // https://github.com/image-rs/image-png/pull/493) would help avoid
     // an extra copy here.
     decodedInterlacedFullWidthRow.resize(this->getEncodedRowBytes(), 0x00);
@@ -721,6 +834,13 @@ int SkPngRustCodec::onGetRepetitionCount() {
     // For example, a repetition count of 4 means that each frame is played 5
     // times and then the animation stops."
     return numPlays - 1;
+}
+
+SkCodec::IsAnimated SkPngRustCodec::onIsAnimated() {
+    if (fReader->has_actl_chunk() && fReader->get_actl_num_frames() > 1) {
+        return IsAnimated::kYes;
+    }
+    return IsAnimated::kNo;
 }
 
 std::optional<SkSpan<const SkPngCodecBase::PaletteColorEntry>> SkPngRustCodec::onTryGetPlteChunk() {

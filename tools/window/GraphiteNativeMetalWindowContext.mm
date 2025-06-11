@@ -16,7 +16,6 @@
 #include "include/gpu/graphite/Surface.h"
 #include "include/gpu/graphite/mtl/MtlBackendContext.h"
 #include "include/gpu/graphite/mtl/MtlGraphiteTypes.h"
-#include "include/gpu/graphite/mtl/MtlGraphiteUtils.h"
 #include "src/base/SkMathPriv.h"
 #include "src/gpu/graphite/ContextOptionsPriv.h"
 #include "tools/graphite/GraphiteToolUtils.h"
@@ -61,7 +60,7 @@ void GraphiteMetalWindowContext::initializeContext() {
     SkASSERT(fDisplayParams->graphiteTestOptions());
     skwindow::GraphiteTestOptions opts = *fDisplayParams->graphiteTestOptions();
 
-    opts.fTestOptions.fContextOptions.fDisableCachedGlyphUploads = true;
+    opts.fTestOptions.fContextOptions.fRequireOrderedRecordings = true;
     // Needed to make synchronous readPixels work:
     opts.fPriv.fStoreContextRefInRecorder = true;
     fDisplayParams =

@@ -62,6 +62,7 @@ skia_cc_library(
         "//tools/gpu:__pkg__",
         "//tools/testrunners/benchmark:__pkg__",
     ],
+    deps = ["//src/base"],
 )
 
 skia_objc_library(
@@ -69,6 +70,7 @@ skia_objc_library(
     srcs = ["AutoreleasePool.mm"],
     hdrs = ["AutoreleasePool.h"],
     visibility = ["//tools/gpu:__pkg__"],
+    deps = ["//src/base"],
 )
 
 skia_cc_library(
@@ -111,6 +113,7 @@ skia_cc_library(
     visibility = ["//dm:__pkg__"],
     deps = [
         "//:core",
+        "//modules/jsonreader",
         "//tools/flags:cmd_flags",
     ],
 )
@@ -243,6 +246,7 @@ skia_cc_library(
     testonly = True,
     hdrs = ["GpuToolUtils.h"],
     visibility = [
+        "//dm:__pkg__",
         "//tools:__subpackages__",
     ],
     deps = [
@@ -334,6 +338,7 @@ skia_cc_library(
         "//src/gpu/vk:headers_to_compile",
         "//src/gpu:headers_to_compile",
         "//src/pdf:headers_to_compile",
+        "//include/docs:headers_to_compile",
     ],
     copts = [
         # Since we are generating .cpp files for headers, some variables/functions which
@@ -379,8 +384,10 @@ skia_cc_library(
         "//:wbmp_decode_codec",
         "//:webp_decode_codec",
         "//:webp_encode_codec",
+        "//modules/jsonreader",
         "//src/gpu/ganesh/gl:ganesh_gl_TEST_UTIL",
         "//src/gpu/ganesh/vk:ganesh_vulkan_TEST_UTIL",
         "//src/gpu/graphite/vk:graphite_native_vulkan_TEST_UTIL",
+        "//tools/sksltrace:sksltraceutils",
     ],
 )

@@ -30,15 +30,13 @@
 #include "src/gpu/graphite/TextureProxy.h"
 #include "src/gpu/graphite/geom/Geometry.h"
 #include "src/gpu/graphite/geom/SubRunData.h"
-#include "src/gpu/graphite/geom/Transform_graphite.h"
+#include "src/gpu/graphite/geom/Transform.h"
 #include "src/gpu/graphite/render/CommonDepthStencilSettings.h"
 #include "src/gpu/graphite/text/TextAtlasManager.h"
 #include "src/sksl/SkSLString.h"
 #include "src/text/gpu/DistanceFieldAdjustTable.h"
 #include "src/text/gpu/SubRunContainer.h"
 #include "src/text/gpu/VertexFiller.h"
-
-#include <string_view>
 
 namespace skgpu::graphite {
 
@@ -50,8 +48,7 @@ constexpr int kNumSDFAtlasTextures = 4;
 }  // namespace
 
 SDFTextLCDRenderStep::SDFTextLCDRenderStep()
-        : RenderStep("SDFTextLCDRenderStep",
-                     "",
+        : RenderStep(RenderStepID::kSDFTextLCD,
                      Flags::kPerformsShading | Flags::kHasTextures | Flags::kEmitsCoverage |
                      Flags::kLCDCoverage,
                      /*uniforms=*/{{"subRunDeviceMatrix", SkSLType::kFloat4x4},

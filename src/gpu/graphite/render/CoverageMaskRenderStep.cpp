@@ -29,11 +29,10 @@
 #include "src/gpu/graphite/geom/CoverageMaskShape.h"
 #include "src/gpu/graphite/geom/Geometry.h"
 #include "src/gpu/graphite/geom/Rect.h"
-#include "src/gpu/graphite/geom/Transform_graphite.h"
+#include "src/gpu/graphite/geom/Transform.h"
 #include "src/gpu/graphite/render/CommonDepthStencilSettings.h"
 
 #include <cstdint>
-#include <string_view>
 
 namespace skgpu::graphite {
 
@@ -58,8 +57,7 @@ static skvx::float2 get_device_translation(const SkM44& localToDevice) {
 }
 
 CoverageMaskRenderStep::CoverageMaskRenderStep()
-        : RenderStep("CoverageMaskRenderStep",
-                     "",
+        : RenderStep(RenderStepID::kCoverageMask,
                      // The mask will have AA outsets baked in, but the original bounds for clipping
                      // still require the outset for analytic coverage.
                      Flags::kPerformsShading | Flags::kHasTextures | Flags::kEmitsCoverage |
@@ -111,10 +109,9 @@ std::string CoverageMaskRenderStep::texturesAndSamplersSkSL(
 }
 
 const char* CoverageMaskRenderStep::fragmentCoverageSkSL() const {
-    return R"(
-        half c = sample(pathAtlas, clamp(textureCoords, maskBounds.LT, maskBounds.RB)).r;
-        outputCoverage = half4(mix(c, 1 - c, invert));
-    )";
+    return
+        "half c = sample(pathAtlas, clamp(textureCoords, maskBounds.LT, maskBounds.RB)).r;\n"
+        "outputCoverage = half4(mix(c, 1 - c, invert));\n";
 }
 
 void CoverageMaskRenderStep::writeVertices(DrawWriter* dw,

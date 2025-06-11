@@ -7,6 +7,7 @@
 
 #include "src/gpu/graphite/task/RenderPassTask.h"
 
+#include "src/gpu/SkBackingFit.h"
 #include "src/gpu/graphite/Caps.h"
 #include "src/gpu/graphite/CommandBuffer.h"
 #include "src/gpu/graphite/ContextPriv.h"
@@ -19,18 +20,30 @@
 
 namespace skgpu::graphite {
 
+namespace {
+
+SkISize get_msaa_size(const SkISize& targetSize, const Caps& caps) {
+    if (caps.differentResolveAttachmentSizeSupport()) {
+        // Use approx size for better reuse.
+        return GetApproxSize(targetSize);
+    }
+
+    return targetSize;
+}
+
+}  // anonymous namespace
+
 sk_sp<RenderPassTask> RenderPassTask::Make(DrawPassList passes,
                                            const RenderPassDesc& desc,
                                            sk_sp<TextureProxy> target,
                                            sk_sp<TextureProxy> dstCopy,
-                                           SkIRect dstCopyBounds) {
+                                           SkIRect dstReadBounds) {
     // For now we have one DrawPass per RenderPassTask
     SkASSERT(passes.size() == 1);
-    // We should only have dst copy bounds if we have a dst copy texture, and the texture should be
-    // big enough to cover the copy bounds that will be sampled.
-    SkASSERT(dstCopyBounds.isEmpty() == !dstCopy);
-    SkASSERT(!dstCopy || (dstCopy->dimensions().width() >= dstCopyBounds.width() &&
-                          dstCopy->dimensions().height() >= dstCopyBounds.height()));
+    // If we have a dst copy texture, ensure it is big enough to cover the copy bounds that
+    // will be sampled.
+    SkASSERT(!dstCopy || (dstCopy->dimensions().width() >= dstReadBounds.width() &&
+                          dstCopy->dimensions().height() >= dstReadBounds.height()));
     if (!target) {
         return nullptr;
     }
@@ -50,19 +63,19 @@ sk_sp<RenderPassTask> RenderPassTask::Make(DrawPassList passes,
                                                     desc,
                                                     std::move(target),
                                                     std::move(dstCopy),
-                                                    dstCopyBounds));
+                                                    dstReadBounds));
 }
 
 RenderPassTask::RenderPassTask(DrawPassList passes,
                                const RenderPassDesc& desc,
                                sk_sp<TextureProxy> target,
                                sk_sp<TextureProxy> dstCopy,
-                               SkIRect dstCopyBounds)
+                               SkIRect dstReadBounds)
         : fDrawPasses(std::move(passes))
         , fRenderPassDesc(desc)
         , fTarget(std::move(target))
         , fDstCopy(std::move(dstCopy))
-        , fDstCopyBounds(dstCopyBounds) {}
+        , fDstReadBounds(dstReadBounds) {}
 
 RenderPassTask::~RenderPassTask() = default;
 
@@ -70,7 +83,22 @@ Task::Status RenderPassTask::prepareResources(ResourceProvider* resourceProvider
                                               ScratchResourceManager* scratchManager,
                                               const RuntimeEffectDictionary* runtimeDict) {
     SkASSERT(fTarget);
-    if (!TextureProxy::InstantiateIfNotLazy(scratchManager, fTarget.get())) {
+
+    bool instantiated;
+    if (scratchManager->pendingReadCount(fTarget.get()) == 0) {
+        // TODO(b/389908339, b/338976898): If there are no pending reads on a scratch texture
+        // instantiation request, it means that the scratch Device was caught by a
+        // Recorder::flushTrackedDevices() event but hasn't actually been restored to its parent. In
+        // this case, the eventual read of the surface will be in another Recording and it can't be
+        // allocated as a true scratch resource.
+        //
+        // Without pending reads, DrawTask does not track its lifecycle to return the scratch
+        // resource, so we need to match that and instantiate with a regular non-shareable resource.
+        instantiated = TextureProxy::InstantiateIfNotLazy(resourceProvider, fTarget.get());
+    } else {
+        instantiated = TextureProxy::InstantiateIfNotLazy(scratchManager, fTarget.get());
+    }
+    if (!instantiated) {
         SKGPU_LOG_W("Failed to instantiate RenderPassTask target. Will not create renderpass!");
         SKGPU_LOG_W("Dimensions are (%d, %d).",
                     fTarget->dimensions().width(), fTarget->dimensions().height());
@@ -102,28 +130,23 @@ Task::Status RenderPassTask::addCommands(Context* context,
     SkASSERT(fTarget && fTarget->isInstantiated());
     SkASSERT(!fDstCopy || fDstCopy->isInstantiated());
 
-    // Set any replay translation and clip, as needed.
-    // The clip set here will intersect with any scissor set during this render pass.
+    // Only apply the replay translation and clip if we're drawing to the final replay target.
     const SkIRect renderTargetBounds = SkIRect::MakeSize(fTarget->dimensions());
     if (fTarget->texture() == replayData.fTarget) {
-        // We're drawing to the final replay target, so apply replay translation and clip.
-        if (replayData.fClip.isEmpty()) {
-            // If no replay clip is defined, default to the render target bounds.
-            commandBuffer->setReplayTranslationAndClip(replayData.fTranslation,
-                                                       renderTargetBounds);
-        } else {
-            // If a replay clip is defined, intersect it with the render target bounds.
-            // If the intersection is empty, we can skip this entire render pass.
-            SkIRect replayClip = replayData.fClip;
-            if (!replayClip.intersect(renderTargetBounds)) {
-                return Status::kSuccess;
-            }
-            commandBuffer->setReplayTranslationAndClip(replayData.fTranslation, replayClip);
+        // The clip set here will intersect with the render target bounds, and then any scissor set
+        // during this render pass. If there is no intersection between the clip and the render
+        // target bounds, we can skip this entire render pass.
+        if (!commandBuffer->setReplayTranslationAndClip(
+                    replayData.fTranslation, replayData.fClip, renderTargetBounds)) {
+            return Status::kSuccess;
         }
+
     } else {
-        // We're not drawing to the final replay target, so don't apply replay translation or clip.
-        // In this case as well, the clip we set defaults to the render target bounds.
-        commandBuffer->setReplayTranslationAndClip({0, 0}, renderTargetBounds);
+        // An empty clip is ignored, and will default to the render target bounds.
+        constexpr SkIVector kNoReplayTranslation = {0, 0};
+        constexpr SkIRect kNoReplayClip = SkIRect::MakeEmpty();
+        commandBuffer->setReplayTranslationAndClip(
+                kNoReplayTranslation, kNoReplayClip, renderTargetBounds);
     }
 
     // We don't instantiate the MSAA or DS attachments in prepareResources because we want to use
@@ -135,7 +158,8 @@ Task::Status RenderPassTask::addCommands(Context* context,
         SkASSERT(fTarget->numSamples() == 1 &&
                  fRenderPassDesc.fColorAttachment.fTextureInfo.numSamples() > 1);
         colorAttachment = resourceProvider->findOrCreateDiscardableMSAAAttachment(
-                fTarget->dimensions(), fRenderPassDesc.fColorAttachment.fTextureInfo);
+                get_msaa_size(fTarget->dimensions(), *context->priv().caps()),
+                fRenderPassDesc.fColorAttachment.fTextureInfo);
         if (!colorAttachment) {
             SKGPU_LOG_W("Could not get Color attachment for RenderPassTask");
             return Status::kFail;
@@ -150,7 +174,8 @@ Task::Status RenderPassTask::addCommands(Context* context,
         // TODO: ensure this is a scratch/recycled texture
         SkASSERT(fTarget->isInstantiated());
         SkISize dimensions = context->priv().caps()->getDepthAttachmentDimensions(
-                fTarget->texture()->textureInfo(), fTarget->dimensions());
+                colorAttachment->textureInfo(), colorAttachment->dimensions());
+
         depthStencilAttachment = resourceProvider->findOrCreateDepthStencilAttachment(
                 dimensions, fRenderPassDesc.fDepthStencilAttachment.fTextureInfo);
         if (!depthStencilAttachment) {
@@ -167,7 +192,7 @@ Task::Status RenderPassTask::addCommands(Context* context,
                                      std::move(resolveAttachment),
                                      std::move(depthStencilAttachment),
                                      fDstCopy ? fDstCopy->texture() : nullptr,
-                                     fDstCopyBounds,
+                                     fDstReadBounds,
                                      fTarget->dimensions(),
                                      fDrawPasses)) {
         return Status::kSuccess;

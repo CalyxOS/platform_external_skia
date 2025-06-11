@@ -9,8 +9,8 @@
 
 #include "include/gpu/graphite/Context.h"
 #include "include/gpu/graphite/ContextOptions.h"
-#include "include/gpu/graphite/dawn/DawnTypes.h"
-#include "include/gpu/graphite/dawn/DawnUtils.h"
+#include "include/gpu/graphite/dawn/DawnBackendContext.h"
+#include "include/gpu/graphite/dawn/DawnGraphiteTypes.h"
 #include "include/private/base/SkOnce.h"
 #include "src/gpu/graphite/ContextOptionsPriv.h"
 #include "tools/gpu/ContextType.h"
@@ -36,6 +36,10 @@ std::unique_ptr<GraphiteTestContext> DawnTestContext::Make(wgpu::BackendType bac
     static SkOnce sOnce;
 
     static constexpr const char* kToggles[] = {
+#if !defined(SK_DEBUG)
+        "skip_validation",
+#endif
+        "disable_lazy_clear_for_mapped_at_creation_buffer", // matches Chromes toggles
         "allow_unsafe_apis",  // Needed for dual-source blending.
         "use_user_defined_labels_in_backend",
         // Robustness impacts performance and is always disabled when running Graphite in Chrome,
@@ -54,17 +58,19 @@ std::unique_ptr<GraphiteTestContext> DawnTestContext::Make(wgpu::BackendType bac
     sOnce([&]{
         DawnProcTable backendProcs = dawn::native::GetProcs();
         dawnProcSetProcs(&backendProcs);
-        WGPUInstanceDescriptor desc{};
+        wgpu::InstanceDescriptor desc{};
         // need for WaitAny with timeout > 0
-        desc.features.timedWaitAnyEnable = true;
+        desc.capabilities.timedWaitAnyEnable = true;
         sInstance = std::make_unique<dawn::native::Instance>(&desc);
     });
 
     dawn::native::Adapter matchedAdaptor;
 
     wgpu::RequestAdapterOptions options;
-    options.compatibilityMode =
-            backend == wgpu::BackendType::OpenGL || backend == wgpu::BackendType::OpenGLES;
+    options.featureLevel =
+            backend == wgpu::BackendType::OpenGL || backend == wgpu::BackendType::OpenGLES
+                    ? wgpu::FeatureLevel::Compatibility
+                    : wgpu::FeatureLevel::Core;
     options.nextInChain = &togglesDesc;
     std::vector<dawn::native::Adapter> adapters = sInstance->EnumerateAdapters(&options);
     SkASSERT(!adapters.empty());
@@ -143,6 +149,9 @@ std::unique_ptr<GraphiteTestContext> DawnTestContext::Make(wgpu::BackendType bac
     if (adapter.HasFeature(wgpu::FeatureName::DawnTexelCopyBufferRowAlignment)) {
         features.push_back(wgpu::FeatureName::DawnTexelCopyBufferRowAlignment);
     }
+    if (adapter.HasFeature(wgpu::FeatureName::ImplicitDeviceSynchronization)) {
+        features.push_back(wgpu::FeatureName::ImplicitDeviceSynchronization);
+    }
 
     wgpu::DeviceDescriptor desc;
     desc.requiredFeatureCount  = features.size();
@@ -150,13 +159,14 @@ std::unique_ptr<GraphiteTestContext> DawnTestContext::Make(wgpu::BackendType bac
     desc.nextInChain           = &togglesDesc;
     desc.SetDeviceLostCallback(
             wgpu::CallbackMode::AllowSpontaneous,
-            [](const wgpu::Device&, wgpu::DeviceLostReason reason, const char* message) {
+            [](const wgpu::Device&, wgpu::DeviceLostReason reason, wgpu::StringView message) {
                 if (reason != wgpu::DeviceLostReason::Destroyed) {
-                    SK_ABORT("Device lost: %s\n", message);
+                    SK_ABORT("Device lost: %.*s\n", static_cast<int>(message.length), message.data);
                 }
             });
-    desc.SetUncapturedErrorCallback([](const wgpu::Device&, wgpu::ErrorType, const char* message) {
-        SkDebugf("Device error: %s\n", message);
+    desc.SetUncapturedErrorCallback([](const wgpu::Device&, wgpu::ErrorType,
+                                       wgpu::StringView message) {
+        SkDebugf("Device error: %.*s\n", static_cast<int>(message.length), message.data);
     });
 
     wgpu::Device device = wgpu::Device::Acquire(matchedAdaptor.CreateDevice(&desc));

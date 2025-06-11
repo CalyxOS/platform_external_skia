@@ -9,6 +9,7 @@
 #define skgpu_graphite_ShaderCodeDictionary_DEFINED
 
 #include "include/core/SkSpan.h"
+#include "include/effects/SkRuntimeEffect.h"
 #include "include/private/base/SkTo.h"
 #include "src/base/SkArenaAlloc.h"
 #include "src/base/SkEnumBitMask.h"
@@ -44,15 +45,15 @@ private:
 };
 
 enum class SnippetRequirementFlags : uint32_t {
-    kNone             = 0x0,
+    kNone                  = 0x0,
     // Signature of the ShaderNode
-    kLocalCoords      = 0x1,
-    kPriorStageOutput = 0x2,  // AKA the "input" color, or the "src" argument for a blender
-    kBlenderDstColor  = 0x4,  // The "dst" argument for a blender
+    kLocalCoords           = 0x1,
+    kPriorStageOutput      = 0x2,  // AKA the "input" color, or the "src" argument for a blender
+    kBlenderDstColor       = 0x4,  // The "dst" argument for a blender
     // Special values and/or behaviors required for the snippet
-    kPrimitiveColor   = 0x8,
-    kGradientBuffer   = 0x10,
-    kStoresData       = 0x20, // Indicates that the node stores numerical data
+    kPrimitiveColor        = 0x8,
+    kGradientBuffer        = 0x10,
+    kStoresSamplerDescData = 0x20, // Indicates that the node stores numerical sampler data
 };
 SK_MAKE_BITMASK_OPS(SnippetRequirementFlags)
 
@@ -104,8 +105,8 @@ struct ShaderSnippet {
     bool needsBlenderDstColor() const {
         return SkToBool(fSnippetRequirementFlags & SnippetRequirementFlags::kBlenderDstColor);
     }
-    bool storesData() const {
-        return SkToBool(fSnippetRequirementFlags & SnippetRequirementFlags::kStoresData);
+    bool storesSamplerDescData() const {
+        return SkToBool(fSnippetRequirementFlags & SnippetRequirementFlags::kStoresSamplerDescData);
     }
 
     const char* fName = nullptr;
@@ -165,8 +166,8 @@ public:
 
             fRequiredFlags |= (child->requiredFlags() & ~mask);
         }
-        // Data should only be provided if the snippet has the kStoresData flag.
-        SkASSERT(fData.empty() || snippet->storesData());
+        // Data should only be provided if the snippet has the kStoresSamplerDescData flag.
+        SkASSERT(fData.empty() || snippet->storesSamplerDescData());
     }
 
     std::string generateDefaultPreamble(const ShaderInfo& shaderInfo) const;
@@ -203,7 +204,10 @@ private:
 // SkRuntimeEffect, including de-duplicating equivalent SkRuntimeEffect objects.
 class ShaderCodeDictionary {
 public:
-    ShaderCodeDictionary(Layout layout);
+    ShaderCodeDictionary(Layout layout,
+                         SkSpan<sk_sp<SkRuntimeEffect>> userDefinedKnownRuntimeEffects);
+
+    UniquePaintParamsID findOrCreate(const PaintParamsKey&);
 
     UniquePaintParamsID findOrCreate(PaintParamsKeyBuilder*) SK_EXCLUDES(fSpinLock);
 
@@ -226,13 +230,28 @@ public:
         return &fBuiltInCodeSnippets[SkTo<int>(codeSnippetID)];
     }
 
+    // getEntry can be used to retrieve the ShaderSnippet for a user-defined known runtime effect
+    // but, since the ShaderCodeDictionary owns those runtime effects, we need another entry
+    // point to retrieve the actual effect. For unknown runtime effects this is handled by the
+    // RuntimeEffectDictionary which, transiently, holds a ref on the encountered runtime effects.
+    const SkRuntimeEffect* getUserDefinedKnownRuntimeEffect(int codeSnippetID) const;
+
+    // Returns -1 on failure
     int findOrCreateRuntimeEffectSnippet(const SkRuntimeEffect* effect) SK_EXCLUDES(fSpinLock);
+
+    bool isUserDefinedKnownRuntimeEffect(int candidate) const;
+#if defined(GPU_TEST_UTILS)
+    int numUserDefinedRuntimeEffects() const SK_EXCLUDES(fSpinLock);
+    int numUserDefinedKnownRuntimeEffects() const;
+#endif
 
 private:
     const char* addTextToArena(std::string_view text);
 
     SkSpan<const Uniform> convertUniforms(const SkRuntimeEffect* effect);
     ShaderSnippet convertRuntimeEffect(const SkRuntimeEffect* effect, const char* name);
+
+    void registerUserDefinedKnownRuntimeEffects(SkSpan<sk_sp<SkRuntimeEffect>>);
 
     const Layout fLayout;
 
@@ -241,10 +260,16 @@ private:
     using KnownRuntimeEffectArray = std::array<ShaderSnippet, SkKnownRuntimeEffects::kStableKeyCnt>;
     KnownRuntimeEffectArray fKnownRuntimeEffectCodeSnippets SK_GUARDED_BY(fSpinLock);
 
+    using ShaderSnippetArray = skia_private::TArray<ShaderSnippet>;
+    using RuntimeEffectArray = skia_private::TArray<sk_sp<SkRuntimeEffect>>;
+
+    // These two arrays are not guarded by a lock since they are only initialized in the ctor
+    ShaderSnippetArray fUserDefinedKnownCodeSnippets;
+    RuntimeEffectArray fUserDefinedKnownRuntimeEffects;
+
     // The value returned from 'getEntry' must be stable so, hold the user-defined code snippet
     // entries as pointers.
-    using RuntimeEffectArray = skia_private::TArray<ShaderSnippet>;
-    RuntimeEffectArray fUserDefinedCodeSnippets SK_GUARDED_BY(fSpinLock);
+    ShaderSnippetArray fUserDefinedCodeSnippets SK_GUARDED_BY(fSpinLock);
 
     // TODO: can we do something better given this should have write-seldom/read-often behavior?
     mutable SkSpinlock fSpinLock;

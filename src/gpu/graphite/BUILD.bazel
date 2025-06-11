@@ -23,8 +23,10 @@ GRAPHITE_FILES = [
     "Caps.h",
     "ClientMappedBufferManager.cpp",
     "ClientMappedBufferManager.h",
-    "ClipStack_graphite.cpp",
-    "ClipStack_graphite.h",
+    "ClipAtlasManager.cpp",
+    "ClipAtlasManager.h",
+    "ClipStack.cpp",
+    "ClipStack.h",
     "CommandBuffer.cpp",
     "CommandBuffer.h",
     "CommandTypes.h",
@@ -129,6 +131,8 @@ GRAPHITE_FILES = [
     "Surface_Graphite.h",
     "Texture.cpp",
     "Texture.h",
+    "TextureFormat.cpp",
+    "TextureFormat.h",
     "TextureInfo.cpp",
     "TextureInfoPriv.h",
     "TextureProxy.cpp",
@@ -157,7 +161,8 @@ PRECOMPILE_FILES = [
     "FactoryFunctions.h",
     "PrecompileInternal.h",
     "PublicPrecompile.cpp",
-    "AndroidSpecificPrecompile.h",
+    "SerializationUtils.cpp",
+    "SerializationUtils.h",
 ]
 
 split_srcs_and_hdrs(
@@ -235,6 +240,7 @@ skia_cc_library(
         "GPU_TEST_UTILS",
     ],
     visibility = [
+        "//dm:__pkg__",
         "//src/gpu/graphite/mtl:__pkg__",
         "//src/gpu/graphite/vk:__pkg__",
         "//tools:__subpackages__",

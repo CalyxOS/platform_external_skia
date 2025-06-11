@@ -12,6 +12,7 @@
 #include "include/core/SkBlurTypes.h"
 #include "include/core/SkCanvas.h"
 #include "include/core/SkColorFilter.h"
+#include "include/core/SkM44.h"
 #include "include/core/SkMaskFilter.h"
 #include "include/core/SkMatrix.h"
 #include "include/core/SkPaint.h"
@@ -601,7 +602,7 @@ void SkDevice::drawShadow(const SkPath& path, const SkDrawShadowRec& rec) {
     }
 
     SkMatrix viewMatrix = this->localToDevice();
-    SkAutoDeviceTransformRestore adr(this, SkMatrix::I());
+    SkAutoDeviceTransformRestore adr(this, SkM44());
 
 #if !defined(SK_ENABLE_OPTIMIZE_SIZE)
     auto drawVertsProc = [this](const SkVertices* vertices, SkBlendMode mode, const SkPaint& paint,
@@ -612,8 +613,8 @@ void SkDevice::drawShadow(const SkPath& path, const SkDrawShadowRec& rec) {
             // change in translation from the cached version.
             SkAutoDeviceTransformRestore adr(
                     this,
-                    hasPerspective ? SkMatrix::I()
-                                   : this->localToDevice() * SkMatrix::Translate(tx, ty));
+                    hasPerspective ? SkM44()
+                                   : this->localToDevice44() * SkM44::Translate(tx, ty));
             // The vertex colors for a tesselated shadow polygon are always either opaque black
             // or transparent and their real contribution to the final blended color is via
             // their alpha. We can skip expensive per-vertex color conversion for this.
@@ -725,7 +726,7 @@ void SkDevice::drawShadow(const SkPath& path, const SkDrawShadowRec& rec) {
             SkScalar sigma = SkBlurMask::ConvertRadiusToSigma(blurRadius);
             bool respectCTM = false;
             paint.setMaskFilter(SkMaskFilter::MakeBlur(kNormal_SkBlurStyle, sigma, respectCTM));
-            this->drawPath(devSpacePath, paint);
+            this->drawPath(devSpacePath, paint, true);
         }
     }
 
@@ -837,14 +838,14 @@ void SkDevice::drawShadow(const SkPath& path, const SkDrawShadowRec& rec) {
                                                              &shadowMatrix, &radius)) {
                 return;
             }
-            SkAutoDeviceTransformRestore adr2(this, shadowMatrix);
+            SkAutoDeviceTransformRestore adr2(this, SkM44(shadowMatrix));
 
             SkPaint paint;
             paint.setColor(rec.fSpotColor);
             SkScalar sigma = SkBlurMask::ConvertRadiusToSigma(radius);
             bool respectCTM = false;
             paint.setMaskFilter(SkMaskFilter::MakeBlur(kNormal_SkBlurStyle, sigma, respectCTM));
-            this->drawPath(path, paint);
+            this->drawPath(path, paint, false);
         }
     }
 }

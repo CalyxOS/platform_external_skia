@@ -14,7 +14,6 @@
 #include "include/core/SkBlendMode.h"
 #include "include/core/SkCanvas.h"
 #include "include/core/SkColor.h"
-#include "include/core/SkColorPriv.h"
 #include "include/core/SkColorType.h"
 #include "include/core/SkData.h"
 #include "include/core/SkFontTypes.h"
@@ -41,6 +40,7 @@
 #include "src/base/SkTSort.h"
 #include "src/base/SkUTF.h"
 #include "src/core/SkAutoPixmapStorage.h"
+#include "src/core/SkColorPriv.h"
 #include "src/core/SkLRUCache.h"
 #include "src/core/SkMD5.h"
 #include "src/core/SkOSFile.h"
@@ -69,6 +69,7 @@
 #include "tools/skui/Key.h"
 #include "tools/skui/ModifierKey.h"
 #include "tools/trace/EventTracingPriv.h"
+#include "tools/viewer/AnimatedImageSlide.h"
 #include "tools/viewer/BisectSlide.h"
 #include "tools/viewer/GMSlide.h"
 #include "tools/viewer/ImageSlide.h"
@@ -271,8 +272,6 @@ static DEFINE_string(lotties, PATH_PREFIX "lotties", "Directory to read (Bodymov
 #undef PATH_PREFIX
 
 static DEFINE_string(svgs, "", "Directory to read SVGs from, or a single SVG file.");
-
-static DEFINE_string(rives, "", "Directory to read RIVs from, or a single .riv file.");
 
 static DEFINE_int_2(threads, j, -1,
                "Run threadsafe tests on a threadpool with this many extra threads, "
@@ -990,34 +989,59 @@ void Viewer::initSlides() {
         const CommandLineFlags::StringArray&   fFlags;
         const SlideMaker                       fFactory;
     } gExternalSlidesInfo[] = {
-        { ".mskp", "mskp-dir", FLAGS_mskps,
-          [](const SkString& name, const SkString& path) -> sk_sp<Slide> {
-            return sk_make_sp<MSKPSlide>(name, path);}
-        },
-        { ".skp", "skp-dir", FLAGS_skps,
-            [](const SkString& name, const SkString& path) -> sk_sp<Slide> {
-                return sk_make_sp<SKPSlide>(name, path);}
-        },
-        { ".jpg", "jpg-dir", FLAGS_jpgs,
-            [](const SkString& name, const SkString& path) -> sk_sp<Slide> {
-                return sk_make_sp<ImageSlide>(name, path);}
-        },
-        { ".jxl", "jxl-dir", FLAGS_jxls,
-            [](const SkString& name, const SkString& path) -> sk_sp<Slide> {
-                return sk_make_sp<ImageSlide>(name, path);}
-        },
-#if defined(SK_ENABLE_SKOTTIE)
-        { ".json", "skottie-dir", FLAGS_lotties,
-            [](const SkString& name, const SkString& path) -> sk_sp<Slide> {
-                return sk_make_sp<SkottieSlide>(name, path);}
-        },
+#if defined(SK_CODEC_DECODES_PNG_WITH_LIBPNG)
+        {".mskp",
+         "mskp-dir",
+         FLAGS_mskps,
+         [](const SkString& name, const SkString& path) -> sk_sp<Slide> {
+             return sk_make_sp<MSKPSlide>(name, path);
+         }},
 #endif
-
+        {".skp",
+         "skp-dir",
+         FLAGS_skps,
+         [](const SkString& name, const SkString& path) -> sk_sp<Slide> {
+             return sk_make_sp<SKPSlide>(name, path);
+         }},
+        {".gif",
+         "gif-dir",
+         FLAGS_jpgs,
+         [](const SkString& name, const SkString& path) -> sk_sp<Slide> {
+             return sk_make_sp<AnimatedImageSlide>(name, path);
+         }},
+        {".jpg",
+         "jpg-dir",
+         FLAGS_jpgs,
+         [](const SkString& name, const SkString& path) -> sk_sp<Slide> {
+             return sk_make_sp<ImageSlide>(name, path);
+         }},
+        {".jxl",
+         "jxl-dir",
+         FLAGS_jxls,
+         [](const SkString& name, const SkString& path) -> sk_sp<Slide> {
+             return sk_make_sp<ImageSlide>(name, path);
+         }},
+         {".webp",
+         "webp-dir",
+         FLAGS_jpgs,
+         [](const SkString& name, const SkString& path) -> sk_sp<Slide> {
+             return sk_make_sp<AnimatedImageSlide>(name, path);
+         }},
+#if defined(SK_ENABLE_SKOTTIE)
+        {".json",
+         "skottie-dir",
+         FLAGS_lotties,
+         [](const SkString& name, const SkString& path) -> sk_sp<Slide> {
+             return sk_make_sp<SkottieSlide>(name, path);
+         }},
+#endif
 #if defined(SK_ENABLE_SVG)
-        { ".svg", "svg-dir", FLAGS_svgs,
-            [](const SkString& name, const SkString& path) -> sk_sp<Slide> {
-                return sk_make_sp<SvgSlide>(name, path);}
-        },
+        {".svg",
+         "svg-dir",
+         FLAGS_svgs,
+         [](const SkString& name, const SkString& path) -> sk_sp<Slide> {
+             return sk_make_sp<SvgSlide>(name, path);
+         }},
 #endif
     };
 
@@ -1945,7 +1969,7 @@ void Viewer::onPaint(SkSurface* surface) {
     }
 }
 
-void Viewer::onResize(int width, int height) {
+void Viewer::resizeCurrentSlide(int width, int height) {
     if (fCurrentSlide >= 0) {
         // Resizing can reset the context on some backends so just tear it all down.
         // We'll rebuild these resources on the next draw.
@@ -1957,7 +1981,10 @@ void Viewer::onResize(int width, int height) {
         }
         fSlides[fCurrentSlide]->resize(width / scaleFactor, height / scaleFactor);
     }
+}
 
+void Viewer::onResize(int width, int height) {
+    this->resizeCurrentSlide(width, height);
     fImGuiLayer.setScaleFactor(fWindow->scaleFactor());
     fStatsLayer.setDisplayScale((fZoomUI ? 2.0f : 1.0f) * fWindow->scaleFactor());
 }
@@ -2388,7 +2415,10 @@ void Viewer::drawImGui() {
             if (ImGui::CollapsingHeader("Transform")) {
                 if (ImGui::Checkbox("Apply Backing Scale", &fApplyBackingScale)) {
                     this->updateGestureTransLimit();
-                    this->onResize(fWindow->width(), fWindow->height());
+                    // NOTE: Do not call onResize() as we are in the middle of ImgGui processing,
+                    // and onResize() modifies ImgGui state that is otherwise locked. The backing
+                    // scale factor only affects the slide itself, so adjust that directly.
+                    this->resizeCurrentSlide(fWindow->width(), fWindow->height());
                     // This changes how we manipulate the canvas transform, it's not changing the
                     // window's actual parameters.
                     uiParamsChanged = true;
@@ -3018,21 +3048,13 @@ void Viewer::drawImGui() {
             }
         }
         if (displayParamsChanged || uiParamsChanged) {
-            // Lambdas and unique_ptrs are a bit tricky. We can't have the lambda capture
-            // the unique ptr by reference because the unique_ptr will go out of scope at
-            // the end of this function. We can't capture a unique_ptr with a copy either
-            // because the copy constructor was deleted (by design). Lambdas need to be
-            // able to make copies of all the things they capture. Because we are pretty
-            // sure the deferred actions will be called once, we can pass a pointer in by
-            // reference and re-wrap it to be passed to the window. Just to be safe,
-            // we overwrite the pointer with nullptr after wrapping it to make sure we don't
-            // have two "unique" pointers pointing to the same object.
+            // The unique_ptr cannot be captured, so release it and capture the raw pointer value in
+            // the lambda. The lambda is responsible for deleting it, which will only be called once
             skwindow::DisplayParams* newParams = newParamsBuilder.build().release();
-            fDeferredActions.emplace_back([displayParamsChanged, &newParams, this]() {
-                if (displayParamsChanged && newParams) {
-                    auto npp = std::unique_ptr<skwindow::DisplayParams>(newParams);
-                    newParams = nullptr;
-                    fWindow->setRequestedDisplayParams(std::move(npp));
+            fDeferredActions.emplace_back([displayParamsChanged, newParams, this]() {
+                if (displayParamsChanged) {
+                    fWindow->setRequestedDisplayParams(
+                            std::unique_ptr<skwindow::DisplayParams>(newParams));
                 }
                 fWindow->inval();
                 this->updateTitle();

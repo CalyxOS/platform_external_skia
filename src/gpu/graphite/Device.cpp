@@ -40,7 +40,7 @@
 #include "src/gpu/graphite/geom/Geometry.h"
 #include "src/gpu/graphite/geom/IntersectionTree.h"
 #include "src/gpu/graphite/geom/Shape.h"
-#include "src/gpu/graphite/geom/Transform_graphite.h"
+#include "src/gpu/graphite/geom/Transform.h"
 #include "src/gpu/graphite/text/TextAtlasManager.h"
 
 #include "include/core/SkColorSpace.h"
@@ -812,7 +812,6 @@ void Device::drawRect(const SkRect& r, const SkPaint& paint) {
 
 void Device::drawVertices(const SkVertices* vertices, sk_sp<SkBlender> blender,
                           const SkPaint& paint, bool skipColorXform)  {
-  // TODO - Add GPU handling of skipColorXform once Graphite has its color system more fleshed out.
     this->drawGeometry(this->localToDeviceTransform(),
                        Geometry(sk_ref_sp(vertices)),
                        paint,
@@ -899,7 +898,7 @@ void Device::drawArc(const SkArc& arc, const SkPaint& paint) {
          (paint.getStyle() == SkPaint::kStroke_Style &&
           // square caps can stick out from the shape so we can't do this with an rrect draw
           paint.getStrokeCap() != SkPaint::kSquare_Cap &&
-          // non-wedge cases with strokes will draw lines to the center
+          // wedge cases with strokes will draw lines to the center
           !arc.isWedge()))) {
         this->drawRRect(SkRRect::MakeOval(arc.oval()), paint);
     } else {
@@ -941,6 +940,14 @@ void Device::drawPath(const SkPath& path, const SkPaint& paint, bool pathIsMutab
     // Alternatively, we could move this analysis to SkCanvas. Also, we could consider applying the
     // path effect, being careful about starting point and direction.
     if (!paint.getPathEffect() && !path.isInverseFillType()) {
+        SkPoint linePts[2];
+        if (path.isLine(linePts)) {
+            // A line has zero area, so stroke and stroke-and-fill are equivalent
+            if (paint.getStyle() != SkPaint::kFill_Style) {
+                this->drawPoints(SkCanvas::kLines_PointMode, 2, linePts, paint);
+            } // and if it's fill, nothing is drawn
+            return;
+        }
         if (SkRect oval; path.isOval(&oval)) {
             this->drawOval(oval, paint);
             return;
@@ -1273,25 +1280,24 @@ void Device::drawGeometry(const Transform& localToDevice,
     ClipStack::ElementList clipElements;
     const Clip clip =
             fClip.visitClipStackForDraw(localToDevice, geometry, style, outsetBoundsForAA,
-                                        &clipElements);
+                                        fMSAASupported, &clipElements);
     if (clip.isClippedOut()) {
         // Clipped out, so don't record anything.
         return;
     }
 
     // Figure out what dst color requirements we have, if any.
-    DstReadRequirement dstReadReq = DstReadRequirement::kNone;
     const SkBlenderBase* blender = as_BB(paint.getBlender());
     const std::optional<SkBlendMode> blendMode = blender ? blender->asBlendMode()
                                                          : SkBlendMode::kSrcOver;
     Coverage rendererCoverage = renderer ? renderer->coverage()
                                          : Coverage::kSingleChannel;
-    if ((clip.shader() || !clip.analyticClip().isEmpty()) && rendererCoverage == Coverage::kNone) {
-        // Must upgrade to single channel coverage if there is a clip shader or analytic clip;
+    if (clip.needsCoverage() && rendererCoverage == Coverage::kNone) {
+        // Must upgrade to single channel coverage if the clip requires coverage;
         // but preserve LCD coverage if the Renderer uses that.
         rendererCoverage = Coverage::kSingleChannel;
     }
-    dstReadReq = GetDstReadRequirement(fRecorder->priv().caps(), blendMode, rendererCoverage);
+    bool dstReadRequired = IsDstReadRequired(fRecorder->priv().caps(), blendMode, rendererCoverage);
 
     // A primitive blender should be ignored if there is no primitive color to blend against.
     // Additionally, if a renderer emits a primitive color, then a null primitive blender should
@@ -1304,12 +1310,12 @@ void Device::drawGeometry(const Transform& localToDevice,
 
     PaintParams shading{paint,
                         std::move(primitiveBlender),
-                        clip.analyticClip(),
+                        clip.nonMSAAClip(),
                         sk_ref_sp(clip.shader()),
-                        dstReadReq,
+                        dstReadRequired,
                         skipColorXform};
     const bool dependsOnDst = paint_depends_on_dst(shading) ||
-                              clip.shader() || !clip.analyticClip().isEmpty();
+                              clip.shader() || !clip.nonMSAAClip().isEmpty();
 
     // Some shapes and styles combine multiple draws so the total render step count is split between
     // the main renderer and possibly a secondaryRenderer.
@@ -1334,7 +1340,9 @@ void Device::drawGeometry(const Transform& localToDevice,
     // Decide if we have any reason to flush pending work. We want to flush before updating the clip
     // state or making any permanent changes to a path atlas, since otherwise clip operations and/or
     // atlas entries for the current draw will be flushed.
-    const bool needsFlush = this->needsFlushBeforeDraw(numNewRenderSteps, dstReadReq);
+    DstReadStrategy dstReadStrategy = dstReadRequired ? fDC->dstReadStrategy()
+                                                      : DstReadStrategy::kNoneRequired;
+    const bool needsFlush = this->needsFlushBeforeDraw(numNewRenderSteps, dstReadStrategy);
     if (needsFlush) {
         if (pathAtlas != nullptr) {
             // We need to flush work for all devices associated with the current Recorder.
@@ -1810,16 +1818,16 @@ void Device::internalFlush() {
     fCurrentDepth = DrawOrder::kClearDepth;
 
      // Any cleanup in the AtlasProvider
-    fRecorder->priv().atlasProvider()->compact(/*forceCompact=*/false);
+    fRecorder->priv().atlasProvider()->compact();
 }
 
-bool Device::needsFlushBeforeDraw(int numNewRenderSteps, DstReadRequirement dstReadReq) const {
+bool Device::needsFlushBeforeDraw(int numNewRenderSteps, DstReadStrategy dstReadStrategy) const {
     // Must also account for the elements in the clip stack that might need to be recorded.
     numNewRenderSteps += fClip.maxDeferredClipDraws() * Renderer::kMaxRenderSteps;
     return // Need flush if we don't have room to record into the current list.
            (DrawList::kMaxRenderSteps - fDC->pendingRenderSteps()) < numNewRenderSteps ||
            // Need flush if this draw needs to copy the dst surface for reading.
-           dstReadReq == DstReadRequirement::kTextureCopy;
+           dstReadStrategy == DstReadStrategy::kTextureCopy;
 }
 
 void Device::drawSpecial(SkSpecialImage* special,

@@ -54,13 +54,20 @@ var gniExportDescs = []exporter.GNIExportDesc{
 				"//src/codec:png_codec_base_srcs",
 			},
 		},
-		// TODO(https://crbug.com/381900683): Replace this with more granular lists.
+		// TODO(https://crbug.com/381900683): Replace this with more granular lists
+		// (with `skia_codec_png_base` + `skia_codec_libpng_srcs`).
 		{Var: "skia_codec_png",
 			Rules: []string{
-				"//src/codec:buffet_png_srcs",
-				"//src/codec:common_png_srcs",
+				"//src/codec:buffet_libpng_srcs",
+				"//src/codec:common_libpng_srcs",
 				"//src/codec:png_codec_base_hdrs",
 				"//src/codec:png_codec_base_srcs",
+			},
+		},
+		{Var: "skia_codec_libpng_srcs",
+			Rules: []string{
+				"//src/codec:buffet_libpng_srcs",
+				"//src/codec:common_libpng_srcs",
 			},
 		},
 		{Var: "skia_codec_rust_png_public",
@@ -150,10 +157,16 @@ var gniExportDescs = []exporter.GNIExportDesc{
 				"//src/encode:png_encode_base_srcs",
 				"//src/encode:png_encode_base_hdrs",
 			}},
+		{Var: "skia_encode_libpng_srcs",
+			Rules: []string{
+				"//src/encode:png_encode_srcs",
+				"//src/encode:png_encode_hdrs",
+			}},
 		// TODO(https://crbug.com/381900683): Rename this list.
 		{Var: "skia_encode_png_public",
 			Rules: []string{"//include/encode:png_hdrs"}},
-		// TODO(https://crbug.com/381900683): Replace this with more granular lists.
+		// TODO(https://crbug.com/381900683): Replace this with more granular lists
+		// (with `skia_encode_libpng_srcs` + `skia_encode_png_base`.
 		{Var: "skia_encode_png_srcs",
 			Rules: []string{
 				"//src/encode:png_encode_base_srcs",
@@ -337,6 +350,8 @@ var gniExportDescs = []exporter.GNIExportDesc{
 				"//src/pdf:_pdf_hdrs",
 				"//src/pdf:_pdf_srcs",
 			}},
+		{Var: "skia_pdf_jpeg_public",
+			Rules: []string{"//include/docs:pdf_jpeg_hdrs"}},
 	}},
 	{GNI: "gn/sksl.gni", Vars: []exporter.GNIFileListExportDesc{
 		{Var: "skia_sksl_core_sources",
@@ -408,7 +423,6 @@ var gniExportDescs = []exporter.GNIExportDesc{
 				"//src/sksl:sksl_skslc_module_srcs",
 				"//src/utils:utils_skslc_hdrs",
 				"//src/utils:utils_skslc_srcs",
-				"//src/utils:json_srcs",
 			}}},
 	},
 	{GNI: "gn/sksl_tests.gni", Vars: []exporter.GNIFileListExportDesc{
@@ -448,8 +462,6 @@ var gniExportDescs = []exporter.GNIExportDesc{
 				"//src/utils:core_srcs",
 				"//src/utils:char_to_glyphcache",
 				"//src/utils:canvas_state_utils",
-				"//src/utils:json_hdrs",
-				"//src/utils:json_srcs",
 				"//src/utils:multi_picture_document",
 				"//src/utils:clip_stack_utils",
 				"//src/utils:float_to_decimal",
@@ -636,14 +648,12 @@ var gniExportDescs = []exporter.GNIExportDesc{
 			}},
 	}},
 	{GNI: "modules/skparagraph/skparagraph.gni", Vars: []exporter.GNIFileListExportDesc{
-		{Var: "skparagraph_public",
+		{Var: "skparagraph_core_public",
 			Rules: []string{
-				"//modules/skparagraph/include:hdrs",
-				"//modules/skparagraph/utils:utils_hdrs"}},
-		{Var: "skparagraph_sources",
+				"//modules/skparagraph/include:hdrs"}},
+		{Var: "skparagraph_core_sources",
 			Rules: []string{
-				"//modules/skparagraph/src:srcs",
-				"//modules/skparagraph/utils:utils_srcs"}},
+				"//modules/skparagraph/src:srcs"}},
 		{Var: "skparagraph_utils",
 			Rules: []string{
 				"//modules/skparagraph/utils:utils_hdrs",
@@ -654,6 +664,15 @@ var gniExportDescs = []exporter.GNIExportDesc{
 				"//modules/skparagraph/tests:tests_hdrs",
 				"//modules/skparagraph/tests:tests_srcs",
 			}},
+		// TODO(kjlubick) remove after updating flutter
+		{Var: "skparagraph_public",
+			Rules: []string{
+				"//modules/skparagraph/include:hdrs",
+				"//modules/skparagraph/utils:utils_hdrs"}},
+		{Var: "skparagraph_sources",
+			Rules: []string{
+				"//modules/skparagraph/src:srcs",
+				"//modules/skparagraph/utils:utils_srcs"}},
 	}},
 	{GNI: "modules/skresources/skresources.gni", Vars: []exporter.GNIFileListExportDesc{
 		{Var: "skia_skresources_public",
@@ -694,6 +713,8 @@ var gniExportDescs = []exporter.GNIExportDesc{
 			Rules: []string{"//modules/skunicode/src:icu4x_srcs"}},
 		{Var: "skia_unicode_client_icu_sources",
 			Rules: []string{"//modules/skunicode/src:client_srcs"}},
+		{Var: "skia_unicode_bidi_sources",
+			Rules: []string{"//modules/skunicode/src:bidi_srcs"}},
 		{Var: "skia_unicode_builtin_icu_sources",
 			Rules: []string{"//modules/skunicode/src:builtin_srcs"}},
 		{Var: "skia_unicode_runtime_icu_sources",
@@ -742,6 +763,10 @@ var gniExportDescs = []exporter.GNIExportDesc{
 			Rules: []string{
 				"//modules/skcms:skcms_TransformSkx",
 			}},
+	}},
+	{GNI: "modules/jsonreader/jsonreader.gni", Vars: []exporter.GNIFileListExportDesc{
+		{Var: "skia_jsonreader_sources",
+			Rules: []string{"//modules/jsonreader:jsonreader"}},
 	}},
 }
 

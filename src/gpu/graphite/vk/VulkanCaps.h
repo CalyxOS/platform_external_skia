@@ -15,7 +15,7 @@
 
 namespace skgpu::graphite {
 struct ContextOptions;
-struct VulkanTextureInfo;
+class VulkanTextureInfo;
 
 class VulkanCaps final : public Caps {
 public:
@@ -45,19 +45,22 @@ public:
 
     TextureInfo getDefaultDepthStencilTextureInfo(SkEnumBitMask<DepthStencilFlags>,
                                                   uint32_t sampleCount,
-                                                  Protected) const override;
+                                                  Protected,
+                                                  Discardable discardable) const override;
 
     TextureInfo getDefaultStorageTextureInfo(SkColorType) const override;
 
-    ImmutableSamplerInfo getImmutableSamplerInfo(const TextureProxy* proxy) const override;
+    // Override Caps's implementation in order to consult Vulkan-specific texture properties.
+    DstReadStrategy getDstReadStrategy(const TextureInfo& info) const override;
+
+    ImmutableSamplerInfo getImmutableSamplerInfo(const TextureInfo&) const override;
 
     UniqueKey makeGraphicsPipelineKey(const GraphicsPipelineDesc&,
                                       const RenderPassDesc&) const override;
     UniqueKey makeComputePipelineKey(const ComputePipelineDesc&) const override { return {}; }
 
-    GraphiteResourceKey makeSamplerKey(const SamplerDesc&) const override;
-
-    uint32_t channelMask(const TextureInfo&) const override;
+    bool serializeTextureInfo(const TextureInfo&, SkWStream*) const override;
+    bool deserializeTextureInfo(SkStream*, TextureInfo* out) const override;
 
     bool isTexturable(const VulkanTextureInfo&) const;
 
@@ -68,7 +71,6 @@ public:
     void buildKeyForTexture(SkISize dimensions,
                             const TextureInfo&,
                             ResourceType,
-                            Shareable,
                             GraphiteResourceKey*) const override;
 
     bool shouldAlwaysUseDedicatedImageMemory() const {
@@ -89,14 +91,10 @@ public:
     }
 
     bool supportsYcbcrConversion() const { return fSupportsYcbcrConversion; }
-
     bool supportsDeviceFaultInfo() const { return fSupportsDeviceFaultInfo; }
 
-    uint32_t maxVertexAttributes() const {
-        return fMaxVertexAttributes;
-    }
+    uint32_t maxVertexAttributes()   const { return fMaxVertexAttributes;   }
     uint64_t maxUniformBufferRange() const { return fMaxUniformBufferRange; }
-
     uint64_t maxStorageBufferRange() const { return fMaxStorageBufferRange; }
 
     const VkPhysicalDeviceMemoryProperties2& physicalDeviceMemoryProperties2() const {
@@ -203,7 +201,7 @@ private:
     VkFormat getFormatFromColorType(SkColorType) const;
 
     // Map VkFormat to FormatInfo.
-    static const size_t kNumVkFormats = 22;
+    static const size_t kNumVkFormats = 23;
     FormatInfo fFormatTable[kNumVkFormats];
 
     FormatInfo& getFormatInfo(VkFormat);

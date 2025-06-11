@@ -30,6 +30,8 @@
 enum class SkBlendMode;
 enum class SkTextureCompressionType;
 class SkCapabilities;
+class SkStream;
+class SkWStream;
 
 namespace SkSL { struct ShaderCaps; }
 
@@ -58,20 +60,24 @@ struct ResourceBindingRequirements {
     // separately and their binding indices explicitly specified in the shader text.
     bool fSeparateTextureAndSamplerBinding = false;
 
-    // Whether buffer, texture, and sampler resource bindings use distinct index ranges.
-    bool fDistinctIndexRanges = false;
+    // Whether intrinsic constant information is stored as push constants (rather than normal UBO).
+    // Currently only relevant or possibly true for Vulkan.
+    bool fUseVulkanPushConstantsForIntrinsicConstants = false;
 
-    int fIntrinsicBufferBinding = -1;
-    int fRenderStepBufferBinding = -1;
-    int fPaintParamsBufferBinding = -1;
-    int fGradientBufferBinding = -1;
-};
+    // Whether compute shader textures use separate index ranges from other resources (i.e. buffers)
+    bool fComputeUsesDistinctIdxRangesForTextures = false;
 
-enum class DstReadRequirement {
-    kNone,
-    kTextureCopy,
-    kTextureSample,
-    kFramebufferFetch,
+    // Define set indices. We assume that even if textures and samplers must be bound separately,
+    // they will still be contained within the same set/group.
+    static constexpr int kUnassigned = -1;
+    int fUniformsSetIdx              = kUnassigned;
+    int fTextureSamplerSetIdx        = kUnassigned;
+    int fInputAttachmentSetIdx       = kUnassigned;
+    // Define uniform buffer bindings
+    int fIntrinsicBufferBinding      = kUnassigned;
+    int fRenderStepBufferBinding     = kUnassigned;
+    int fPaintParamsBufferBinding    = kUnassigned;
+    int fGradientBufferBinding       = kUnassigned;
 };
 
 class Caps {
@@ -105,9 +111,16 @@ public:
     virtual TextureInfo getDefaultMSAATextureInfo(const TextureInfo& singleSampledInfo,
                                                   Discardable discardable) const = 0;
 
+    // Currently the uses of this API always are asking for a discardable DepthStencil attachment.
+    // However, we still pass in the parameter here because we don't want the backend caps to be
+    // making decisons on if a thing should be discardable or not. This also allows us to eventual
+    // use non discardable DS attachments, but there aren't any current plans to do so. If we find
+    // out over time that we really will only ever use discardable ones, we could rename this
+    // function to be getDefaultDiscardableDepthStencilTextureInfo.
     virtual TextureInfo getDefaultDepthStencilTextureInfo(SkEnumBitMask<DepthStencilFlags>,
                                                           uint32_t sampleCount,
-                                                          Protected) const = 0;
+                                                          Protected,
+                                                          Discardable discardable) const = 0;
 
     virtual TextureInfo getDefaultStorageTextureInfo(SkColorType) const = 0;
 
@@ -119,26 +132,16 @@ public:
                                               const RenderPassDesc&) const = 0;
     virtual UniqueKey makeComputePipelineKey(const ComputePipelineDesc&) const = 0;
 
-    // Returns a GraphiteResourceKey based upon a SamplerDesc with any additional information that
-    // backends append within their implementation. By default, simply returns a key based upon
-    // the SamplerDesc with no extra info.
-    // TODO: Rather than going through a GraphiteResourceKey, migrate to having a cache of samplers
-    // keyed off of SamplerDesc to minimize heap allocations.
-    virtual GraphiteResourceKey makeSamplerKey(const SamplerDesc& samplerDesc) const;
-
-    // Backends can optionally override this method to return meaningful sampler conversion info.
-    // By default, simply return a default ImmutableSamplerInfo.
-    virtual ImmutableSamplerInfo getImmutableSamplerInfo(const TextureProxy*) const {
-        return {};
-    }
 
     virtual bool extractGraphicsDescs(const UniqueKey&,
                                       GraphicsPipelineDesc*,
                                       RenderPassDesc*,
                                       const RendererProvider*) const { return false; }
 
+    virtual bool serializeTextureInfo(const TextureInfo&, SkWStream*) const = 0;
+    virtual bool deserializeTextureInfo(SkStream*, TextureInfo*) const = 0;
+
     bool areColorTypeAndTextureInfoCompatible(SkColorType, const TextureInfo&) const;
-    virtual uint32_t channelMask(const TextureInfo&) const = 0;
 
     bool isTexturable(const TextureInfo&) const;
     virtual bool isRenderable(const TextureInfo&) const = 0;
@@ -152,7 +155,6 @@ public:
     virtual void buildKeyForTexture(SkISize dimensions,
                                     const TextureInfo&,
                                     ResourceType,
-                                    Shareable,
                                     GraphiteResourceKey*) const = 0;
 
     const ResourceBindingRequirements& resourceBindingRequirements() const {
@@ -173,6 +175,12 @@ public:
     // Returns the aligned rowBytes when transfering to or from a Texture
     size_t getAlignedTextureDataRowBytes(size_t rowBytes) const {
         return SkAlignTo(rowBytes, fTextureDataRowBytesAlignment);
+    }
+
+    // Backends can optionally override this method to return meaningful sampler conversion info.
+    // By default, simply return a default ImmutableSamplerInfo (e.g. no immutable sampler).
+    virtual ImmutableSamplerInfo getImmutableSamplerInfo(const TextureInfo&) const {
+        return {};
     }
 
     /**
@@ -279,6 +287,13 @@ public:
     // Returns whether multisampled render to single sampled is supported.
     bool msaaRenderToSingleSampledSupport() const { return fMSAARenderToSingleSampledSupport; }
 
+    // Returns whether a render pass can have MSAA/depth/stencil attachments and a resolve
+    // attachment with mismatched sizes. Note: the MSAA attachment and the depth/stencil attachment
+    // still need to match their sizes.
+    bool differentResolveAttachmentSizeSupport() const {
+        return fDifferentResolveAttachmentSizeSupport;
+    }
+
     // Returns whether compute shaders are supported.
     bool computeSupport() const { return fComputeSupport; }
 
@@ -298,8 +313,14 @@ public:
 
     skgpu::ShaderErrorHandler* shaderErrorHandler() const { return fShaderErrorHandler; }
 
-    // Returns what method of dst read is required for a draw using the dst color.
-    DstReadRequirement getDstReadRequirement() const;
+    // Returns what method of dst read a draw should use for obtaining the dst color. Backends can
+    // use the default implementation or override this method as needed.
+    // TODO(b/390458117): Once the Vulkan backend supports DstReadStrategy::kReadFromInput for
+    // MSAA textures (and if we are comfortable assuming by this point that all render targets, at
+    // least on Android, support input attachment usage) then the TextureInfo argument can be
+    // removed and backend Caps implementations can report kReadFromInput support some other way
+    // (such as a simple member attribute bool). For now, we must check each render target's info.
+    virtual DstReadStrategy getDstReadStrategy(const TextureInfo&) const;
 
     float minDistanceFieldFontSize() const { return fMinDistanceFieldFontSize; }
     float glyphsAsPathsFontSize() const { return fGlyphsAsPathsFontSize; }
@@ -399,6 +420,7 @@ protected:
     bool fDrawBufferCanBeMapped = true;
     bool fBufferMapsAreAsync = false;
     bool fMSAARenderToSingleSampledSupport = false;
+    bool fDifferentResolveAttachmentSizeSupport = false;
 
     bool fComputeSupport = false;
     bool fSupportsAHardwareBufferImages = false;
@@ -436,7 +458,6 @@ protected:
     bool fAllowMultipleAtlasTextures = true;
     bool fSupportBilerpFromGlyphAtlas = false;
 
-    // Set based on client options
     bool fRequireOrderedRecordings = false;
 
     bool fSetBackendLabels = false;

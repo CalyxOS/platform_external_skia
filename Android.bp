@@ -298,6 +298,7 @@ cc_library_static {
         "src/core/SkMaskBlurFilter.cpp",
         "src/core/SkMaskCache.cpp",
         "src/core/SkMaskFilter.cpp",
+        "src/core/SkMaskFilterBase.cpp",
         "src/core/SkMaskGamma.cpp",
         "src/core/SkMasks.cpp",
         "src/core/SkMatrix.cpp",
@@ -737,7 +738,8 @@ cc_library_static {
         "src/gpu/graphite/BufferManager.cpp",
         "src/gpu/graphite/Caps.cpp",
         "src/gpu/graphite/ClientMappedBufferManager.cpp",
-        "src/gpu/graphite/ClipStack_graphite.cpp",
+        "src/gpu/graphite/ClipAtlasManager.cpp",
+        "src/gpu/graphite/ClipStack.cpp",
         "src/gpu/graphite/CommandBuffer.cpp",
         "src/gpu/graphite/ComputePathAtlas.cpp",
         "src/gpu/graphite/ComputePipeline.cpp",
@@ -785,6 +787,7 @@ cc_library_static {
         "src/gpu/graphite/SpecialImage_Graphite.cpp",
         "src/gpu/graphite/Surface_Graphite.cpp",
         "src/gpu/graphite/Texture.cpp",
+        "src/gpu/graphite/TextureFormat.cpp",
         "src/gpu/graphite/TextureInfo.cpp",
         "src/gpu/graphite/TextureProxy.cpp",
         "src/gpu/graphite/TextureUtils.cpp",
@@ -805,6 +808,7 @@ cc_library_static {
         "src/gpu/graphite/precompile/PrecompileMaskFilter.cpp",
         "src/gpu/graphite/precompile/PrecompileRuntimeEffect.cpp",
         "src/gpu/graphite/precompile/PrecompileShader.cpp",
+        "src/gpu/graphite/precompile/SerializationUtils.cpp",
         "src/gpu/graphite/render/AnalyticBlurRenderStep.cpp",
         "src/gpu/graphite/render/AnalyticRRectRenderStep.cpp",
         "src/gpu/graphite/render/BitmapTextRenderStep.cpp",
@@ -839,7 +843,6 @@ cc_library_static {
         "src/gpu/graphite/vk/VulkanDescriptorSet.cpp",
         "src/gpu/graphite/vk/VulkanFramebuffer.cpp",
         "src/gpu/graphite/vk/VulkanGraphicsPipeline.cpp",
-        "src/gpu/graphite/vk/VulkanGraphiteTypes.cpp",
         "src/gpu/graphite/vk/VulkanGraphiteUtils.cpp",
         "src/gpu/graphite/vk/VulkanImageView.cpp",
         "src/gpu/graphite/vk/VulkanQueueManager.cpp",
@@ -1073,7 +1076,6 @@ cc_library_static {
         "src/utils/SkDashPath.cpp",
         "src/utils/SkEventTracer.cpp",
         "src/utils/SkFloatToDecimal.cpp",
-        "src/utils/SkJSON.cpp",
         "src/utils/SkJSONWriter.cpp",
         "src/utils/SkMatrix22.cpp",
         "src/utils/SkMultiPictureDocument.cpp",
@@ -1283,6 +1285,7 @@ cc_library_static {
         "src/core/SkMaskBlurFilter.cpp",
         "src/core/SkMaskCache.cpp",
         "src/core/SkMaskFilter.cpp",
+        "src/core/SkMaskFilterBase.cpp",
         "src/core/SkMaskGamma.cpp",
         "src/core/SkMasks.cpp",
         "src/core/SkMatrix.cpp",
@@ -1646,7 +1649,6 @@ cc_library_static {
         "src/utils/SkDashPath.cpp",
         "src/utils/SkEventTracer.cpp",
         "src/utils/SkFloatToDecimal.cpp",
-        "src/utils/SkJSON.cpp",
         "src/utils/SkJSONWriter.cpp",
         "src/utils/SkMatrix22.cpp",
         "src/utils/SkMultiPictureDocument.cpp",
@@ -1994,6 +1996,7 @@ cc_library_static {
           "src/ports/SkDebug_android.cpp",
           "src/ports/SkFontMgr_android_ndk.cpp",
           "src/ports/SkOSFile_posix.cpp",
+          "src/ports/SkTypeface_proxy.cpp",
           "src/sksl/codegen/SkSLGLSLCodeGenerator.cpp",
           "src/sksl/codegen/SkSLMetalCodeGenerator.cpp",
           "src/sksl/codegen/SkSLPipelineStageCodeGenerator.cpp",
@@ -2245,7 +2248,6 @@ cc_defaults {
         "gm/bitmapshader.cpp",
         "gm/bitmaptiled.cpp",
         "gm/bleed.cpp",
-        "gm/blend.cpp",
         "gm/blurcircles.cpp",
         "gm/blurcircles2.cpp",
         "gm/blurignorexform.cpp",
@@ -2627,6 +2629,7 @@ cc_defaults {
         "gm/ycbcrimage.cpp",
         "gm/yuv420_odd_dim.cpp",
         "gm/yuvtorgbsubset.cpp",
+        "modules/jsonreader/SkJSONReader.cpp",
         "modules/skottie/gm/ExternalProperties.cpp",
         "modules/skottie/gm/SkottieGM.cpp",
         "modules/skottie/src/BlendModes.cpp",
@@ -2664,7 +2667,6 @@ cc_defaults {
         "modules/skottie/src/effects/InvertEffect.cpp",
         "modules/skottie/src/effects/LevelsEffect.cpp",
         "modules/skottie/src/effects/LinearWipeEffect.cpp",
-        "modules/skottie/src/effects/MotionBlurEffect.cpp",
         "modules/skottie/src/effects/MotionTileEffect.cpp",
         "modules/skottie/src/effects/RadialWipeEffect.cpp",
         "modules/skottie/src/effects/ShadowStyles.cpp",
@@ -2720,7 +2722,6 @@ cc_defaults {
         "modules/skparagraph/src/TextStyle.cpp",
         "modules/skparagraph/src/TextWrapper.cpp",
         "modules/skparagraph/src/TypefaceFontProvider.cpp",
-        "modules/skparagraph/utils/TestFontCollection.cpp",
         "modules/skresources/src/SkAnimCodecPlayer.cpp",
         "modules/skresources/src/SkResources.cpp",
         "modules/sksg/src/SkSGClipEffect.cpp",
@@ -2855,6 +2856,7 @@ cc_defaults {
         "tools/gpu/vk/VkTestUtils.cpp",
         "tools/gpu/vk/VkYcbcrSamplerHelper.cpp",
         "tools/library/LoadDynamicLibrary_posix.cpp",
+        "tools/sksltrace/SkSLTraceUtils.cpp",
         "tools/text/SkTextBlobTrace.cpp",
         "tools/text/gpu/TextBlobTools.cpp",
         "tools/timer/Timer.cpp",
@@ -2897,11 +2899,16 @@ cc_defaults {
         "modules/skparagraph/tests/SkParagraphTest.cpp",
         "modules/skparagraph/tests/SkShaperJSONWriter.cpp",
         "modules/skparagraph/tests/SkShaperJSONWriterTest.cpp",
+        "modules/skparagraph/utils/TestFontCollection.cpp",
         "modules/sksg/tests/SGTest.cpp",
         "modules/skshaper/tests/ShaperTest.cpp",
         "modules/skunicode/tests/SkUnicodeTest.cpp",
         "modules/svg/tests/Filters.cpp",
         "modules/svg/tests/Text.cpp",
+        "src/codec/SkIcoCodec.cpp",
+        "src/codec/SkPngCodec.cpp",
+        "src/codec/SkPngCodecBase.cpp",
+        "src/codec/SkPngCompositeChunkReader.cpp",
         "src/gpu/ganesh/vk/GrVkSecondaryCBDrawContext.cpp",
         "tests/AAClipTest.cpp",
         "tests/AdvancedBlendTest.cpp",
@@ -2948,6 +2955,7 @@ cc_defaults {
         "tests/ColorTest.cpp",
         "tests/CompressedBackendAllocationTest.cpp",
         "tests/CopySurfaceTest.cpp",
+        "tests/CoreBlittersTest.cpp",
         "tests/CtsEnforcement.cpp",
         "tests/CubicChopTest.cpp",
         "tests/CubicMapTest.cpp",
@@ -3156,6 +3164,7 @@ cc_defaults {
         "tests/PictureTest.cpp",
         "tests/PinnedImageTest.cpp",
         "tests/PixelRefTest.cpp",
+        "tests/PngGainmapTest.cpp",
         "tests/Point3Test.cpp",
         "tests/PointTest.cpp",
         "tests/PolyUtilsTest.cpp",
@@ -3312,11 +3321,12 @@ cc_defaults {
         "tests/graphite/precompile/CombinationBuilderTest.cpp",
         "tests/graphite/precompile/PaintParamsKeyTest.cpp",
         "tests/graphite/precompile/ThreadedPrecompileTest.cpp",
+        "tests/graphite/precompile/UserdefinedStableKeyTest.cpp",
     ],
 }
 
-cc_library_shared {
-    name: "libskqp_jni",
+cc_defaults {
+    name: "skqp_jni_defaults",
     sdk_version: "26",
     stl: "libc++_static",
     compile_multilib: "both",
@@ -3428,7 +3438,6 @@ cc_library_shared {
         "gm/bitmapshader.cpp",
         "gm/bitmaptiled.cpp",
         "gm/bleed.cpp",
-        "gm/blend.cpp",
         "gm/blurcircles.cpp",
         "gm/blurcircles2.cpp",
         "gm/blurignorexform.cpp",
@@ -3828,6 +3837,7 @@ cc_library_shared {
         "modules/bentleyottmann/tests/PointTest.cpp",
         "modules/bentleyottmann/tests/SegmentTest.cpp",
         "modules/bentleyottmann/tests/SweepLineTest.cpp",
+        "modules/jsonreader/SkJSONReader.cpp",
         "modules/skcms/skcms.cc",
         "modules/skcms/src/skcms_TransformBaseline.cc",
         "modules/skresources/src/SkAnimCodecPlayer.cpp",
@@ -4013,6 +4023,7 @@ cc_library_shared {
         "src/core/SkMaskBlurFilter.cpp",
         "src/core/SkMaskCache.cpp",
         "src/core/SkMaskFilter.cpp",
+        "src/core/SkMaskFilterBase.cpp",
         "src/core/SkMaskGamma.cpp",
         "src/core/SkMasks.cpp",
         "src/core/SkMatrix.cpp",
@@ -4456,7 +4467,8 @@ cc_library_shared {
         "src/gpu/graphite/BufferManager.cpp",
         "src/gpu/graphite/Caps.cpp",
         "src/gpu/graphite/ClientMappedBufferManager.cpp",
-        "src/gpu/graphite/ClipStack_graphite.cpp",
+        "src/gpu/graphite/ClipAtlasManager.cpp",
+        "src/gpu/graphite/ClipStack.cpp",
         "src/gpu/graphite/CommandBuffer.cpp",
         "src/gpu/graphite/ComputePathAtlas.cpp",
         "src/gpu/graphite/ComputePipeline.cpp",
@@ -4504,6 +4516,7 @@ cc_library_shared {
         "src/gpu/graphite/SpecialImage_Graphite.cpp",
         "src/gpu/graphite/Surface_Graphite.cpp",
         "src/gpu/graphite/Texture.cpp",
+        "src/gpu/graphite/TextureFormat.cpp",
         "src/gpu/graphite/TextureInfo.cpp",
         "src/gpu/graphite/TextureProxy.cpp",
         "src/gpu/graphite/TextureUtils.cpp",
@@ -4524,6 +4537,7 @@ cc_library_shared {
         "src/gpu/graphite/precompile/PrecompileMaskFilter.cpp",
         "src/gpu/graphite/precompile/PrecompileRuntimeEffect.cpp",
         "src/gpu/graphite/precompile/PrecompileShader.cpp",
+        "src/gpu/graphite/precompile/SerializationUtils.cpp",
         "src/gpu/graphite/render/AnalyticBlurRenderStep.cpp",
         "src/gpu/graphite/render/AnalyticRRectRenderStep.cpp",
         "src/gpu/graphite/render/BitmapTextRenderStep.cpp",
@@ -4558,7 +4572,6 @@ cc_library_shared {
         "src/gpu/graphite/vk/VulkanDescriptorSet.cpp",
         "src/gpu/graphite/vk/VulkanFramebuffer.cpp",
         "src/gpu/graphite/vk/VulkanGraphicsPipeline.cpp",
-        "src/gpu/graphite/vk/VulkanGraphiteTypes.cpp",
         "src/gpu/graphite/vk/VulkanGraphiteUtils.cpp",
         "src/gpu/graphite/vk/VulkanImageView.cpp",
         "src/gpu/graphite/vk/VulkanQueueManager.cpp",
@@ -4794,7 +4807,6 @@ cc_library_shared {
         "src/utils/SkDashPath.cpp",
         "src/utils/SkEventTracer.cpp",
         "src/utils/SkFloatToDecimal.cpp",
-        "src/utils/SkJSON.cpp",
         "src/utils/SkJSONWriter.cpp",
         "src/utils/SkMatrix22.cpp",
         "src/utils/SkMultiPictureDocument.cpp",
@@ -4870,6 +4882,7 @@ cc_library_shared {
         "tests/ColorTest.cpp",
         "tests/CompressedBackendAllocationTest.cpp",
         "tests/CopySurfaceTest.cpp",
+        "tests/CoreBlittersTest.cpp",
         "tests/CtsEnforcement.cpp",
         "tests/CubicChopTest.cpp",
         "tests/CubicMapTest.cpp",
@@ -5077,6 +5090,7 @@ cc_library_shared {
         "tests/PictureTest.cpp",
         "tests/PinnedImageTest.cpp",
         "tests/PixelRefTest.cpp",
+        "tests/PngGainmapTest.cpp",
         "tests/Point3Test.cpp",
         "tests/PointTest.cpp",
         "tests/PolyUtilsTest.cpp",
@@ -5268,6 +5282,7 @@ cc_library_shared {
         "tests/graphite/precompile/CombinationBuilderTest.cpp",
         "tests/graphite/precompile/PaintParamsKeyTest.cpp",
         "tests/graphite/precompile/ThreadedPrecompileTest.cpp",
+        "tests/graphite/precompile/UserdefinedStableKeyTest.cpp",
         "third_party/etc1/etc1.cpp",
         "tools/AndroidSkDebugToStdOut.cpp",
         "tools/CrashHandler.cpp",
@@ -5325,11 +5340,14 @@ cc_library_shared {
         "tools/graphite/GraphiteToolUtils.cpp",
         "tools/graphite/ProtectedUtils_Graphite.cpp",
         "tools/graphite/UniqueKeyUtils.cpp",
+        "tools/graphite/precompile/PipelineCallbackHandler.cpp",
+        "tools/graphite/precompile/PrecompileEffectFactories.cpp",
         "tools/graphite/vk/GraphiteVulkanTestContext.cpp",
         "tools/library/LoadDynamicLibrary_posix.cpp",
         "tools/skqp/src/jni_skqp.cpp",
         "tools/skqp/src/skqp.cpp",
         "tools/skqp/src/skqp_GpuTestProcs.cpp",
+        "tools/sksltrace/SkSLTraceUtils.cpp",
         "tools/text/SkTextBlobTrace.cpp",
         "tools/text/gpu/TextBlobTools.cpp",
         "tools/timer/Timer.cpp",
@@ -5355,7 +5373,20 @@ cc_library_shared {
     ]
 }
 
+cc_library_shared {
+    // Note: this must be included in the list of libraries that SkQP attempts
+    // to load in
+    // platform_tools/android/apps/skqp/src/main/java/org/skia/skqp/SkQP.java
+    name: "libskqp_jni",
+    defaults: ["skqp_jni_defaults"],
+    // Appended to the list of cflags set in skqp_jni_defaults
+    cflags: [
+        
+    ],
+}
+
 android_test {
+    // Module (and APK) name
     name: "CtsSkQPTestCases",
     team: "trendy_team_android_core_graphics_stack",
     defaults: ["cts_defaults"],
@@ -5363,6 +5394,11 @@ android_test {
         "general-tests",
         "cts",
     ],
+
+    // These both override the package names set in AndroidManifest.xml (which
+    // remain there to allow building/running SkQP outside of Android framework)
+    package_name: "org.skia.skqp",
+    instrumentation_target_package: "org.skia.skqp",
 
     libs: ["android.test.runner.stubs"],
     jni_libs: ["libskqp_jni"],
@@ -5373,13 +5409,56 @@ android_test {
         "ctstestrunner-axt",
     ],
     manifest: "platform_tools/android/apps/skqp/src/main/AndroidManifest.xml",
-    test_config: "platform_tools/android/apps/skqp/src/main/AndroidTest.xml",
+    test_config_template: "platform_tools/android/apps/skqp/src/main/AndroidTestTemplate.xml",
 
     asset_dirs: ["platform_tools/android/apps/skqp/src/main/assets", "resources"],
     resource_dirs: ["platform_tools/android/apps/skqp/src/main/res"],
     srcs: ["platform_tools/android/apps/skqp/src/main/java/**/*.java"],
 
     sdk_version: "test_current",
+}
 
+cc_library_shared {
+    // Note: this must be included in the list of libraries that SkQP attempts
+    // to load in
+    // platform_tools/android/apps/skqp/src/main/java/org/skia/skqp/SkQP.java
+    name: "libskqp_jni_alltests",
+    defaults: ["skqp_jni_defaults"],
+    // Appended to the list of cflags set in skqp_jni_defaults
+    cflags: [
+        "-DSKQP_ENFORCE_ALL_INCLUDED_TESTS",
+    ],
+}
+
+android_test {
+    // Module (and APK) name
+    name: "AllSkQPTestCases",
+    team: "trendy_team_android_core_graphics_stack",
+    defaults: ["cts_defaults"],
+    test_suites: [
+        "general-tests",
+    ],
+
+    // These both override the package names set in AndroidManifest.xml (which
+    // remain there to allow building/running SkQP outside of Android framework)
+    package_name: "org.skia.skqp_alltests",
+    instrumentation_target_package: "org.skia.skqp_alltests",
+
+    libs: ["android.test.runner.stubs"],
+    jni_libs: ["libskqp_jni_alltests"],
+    compile_multilib: "both",
+
+    static_libs: [
+        "android-support-design",
+        "ctstestrunner-axt",
+    ],
+    manifest: "platform_tools/android/apps/skqp/src/main/AndroidManifest.xml",
+    test_config_template: "platform_tools/android/apps/skqp/src/main/AndroidTestTemplate.xml",
+
+    asset_dirs: ["platform_tools/android/apps/skqp/src/main/assets", "resources"],
+    resource_dirs: ["platform_tools/android/apps/skqp/src/main/res"],
+    srcs: ["platform_tools/android/apps/skqp/src/main/java/**/*.java"],
+
+    sdk_version: "test_current",
 }
 

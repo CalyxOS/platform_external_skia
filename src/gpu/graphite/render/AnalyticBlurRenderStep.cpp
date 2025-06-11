@@ -24,16 +24,13 @@
 #include "src/gpu/graphite/geom/AnalyticBlurMask.h"
 #include "src/gpu/graphite/geom/Geometry.h"
 #include "src/gpu/graphite/geom/Rect.h"
-#include "src/gpu/graphite/geom/Transform_graphite.h"
+#include "src/gpu/graphite/geom/Transform.h"
 #include "src/gpu/graphite/render/CommonDepthStencilSettings.h"
-
-#include <string_view>
 
 namespace skgpu::graphite {
 
 AnalyticBlurRenderStep::AnalyticBlurRenderStep()
-        : RenderStep("AnalyticBlurRenderStep",
-                     "",
+        : RenderStep(RenderStepID::kAnalyticBlur,
                      Flags::kPerformsShading | Flags::kHasTextures | Flags::kEmitsCoverage,
                      /*uniforms=*/
                      {{"localToDevice", SkSLType::kFloat4x4},
@@ -54,11 +51,10 @@ AnalyticBlurRenderStep::AnalyticBlurRenderStep()
                      {{"scaledShapeCoords", SkSLType::kFloat2}}) {}
 
 std::string AnalyticBlurRenderStep::vertexSkSL() const {
-    return R"(
-        float4 devPosition = localToDevice * float4(position, depth, 1.0);
-        stepLocalCoords = position;
-        scaledShapeCoords = (deviceToScaledShape * devPosition.xy1).xy;
-    )";
+    return
+        "float4 devPosition = localToDevice * float4(position, depth, 1.0);\n"
+        "stepLocalCoords = position;\n"
+        "scaledShapeCoords = (deviceToScaledShape * devPosition.xy1).xy;\n";
 }
 
 std::string AnalyticBlurRenderStep::texturesAndSamplersSkSL(

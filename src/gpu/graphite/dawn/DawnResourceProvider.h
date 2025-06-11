@@ -8,7 +8,7 @@
 #ifndef skgpu_graphite_DawnResourceProvider_DEFINED
 #define skgpu_graphite_DawnResourceProvider_DEFINED
 
-#include "include/gpu/graphite/dawn/DawnTypes.h"
+#include "include/gpu/graphite/dawn/DawnGraphiteTypes.h"
 #include "src/core/SkLRUCache.h"
 #include "src/core/SkTHash.h"
 #include "src/gpu/graphite/PipelineData.h"
@@ -39,7 +39,8 @@ public:
     sk_sp<DawnTexture> findOrCreateDiscardableMSAALoadTexture(SkISize dimensions,
                                                               const TextureInfo& msaaInfo);
 
-    wgpu::RenderPipeline findOrCreateBlitWithDrawPipeline(const RenderPassDesc& renderPassDesc);
+    wgpu::RenderPipeline findOrCreateBlitWithDrawPipeline(const RenderPassDesc& renderPassDesc,
+                                                          bool srcIsMSAA);
 
     sk_sp<DawnBuffer> findOrCreateDawnBuffer(size_t size,
                                              BufferType type,
@@ -68,12 +69,14 @@ public:
 
 private:
     sk_sp<GraphicsPipeline> createGraphicsPipeline(const RuntimeEffectDictionary*,
+                                                   const UniqueKey&,
                                                    const GraphicsPipelineDesc&,
                                                    const RenderPassDesc&,
-                                                   SkEnumBitMask<PipelineCreationFlags>) override;
+                                                   SkEnumBitMask<PipelineCreationFlags>,
+                                                   uint32_t compilationID) override;
     sk_sp<ComputePipeline> createComputePipeline(const ComputePipelineDesc&) override;
 
-    sk_sp<Texture> createTexture(SkISize, const TextureInfo&, skgpu::Budgeted) override;
+    sk_sp<Texture> createTexture(SkISize, const TextureInfo&) override;
     sk_sp<Buffer> createBuffer(size_t size, BufferType type, AccessPattern) override;
 
     sk_sp<Texture> onCreateWrappedTexture(const BackendTexture&) override;
@@ -108,6 +111,8 @@ private:
     class IntrinsicBuffer;
     class IntrinsicConstantsManager;
     std::unique_ptr<IntrinsicConstantsManager> fIntrinsicConstantsManager;
+
+    SingleOwner* fSingleOwner = nullptr;
 };
 
 }  // namespace skgpu::graphite

@@ -34,7 +34,7 @@ public:
     // pointer to indicate that shader node data must be analyzed to determine whether
     // immutable samplers are used, and if so, ascertain SamplerDescs for them.
     // TODO(b/366220690): Actually perform this analysis.
-
+    //
     // If provided a valid container ptr, this function will delegate the addition of SamplerDescs
     // for each sampler the nodes utilize (dynamic and immutable). This way, a SamplerDesc's index
     // within the container can inform its binding order. Each SamplerDesc will be either:
@@ -50,14 +50,19 @@ public:
                                             UniquePaintParamsID,
                                             bool useStorageBuffers,
                                             skgpu::Swizzle writeSwizzle,
+                                            DstReadStrategy dstReadStrategyIfRequired,
                                             skia_private::TArray<SamplerDesc>* outDescs = nullptr);
 
+    const ShaderCodeDictionary* shaderCodeDictionary() const {
+        return fShaderCodeDictionary;
+    }
     const RuntimeEffectDictionary* runtimeEffectDictionary() const {
         return fRuntimeEffectDictionary;
     }
+
     const char* ssboIndex() const { return fSsboIndex; }
 
-    DstReadRequirement dstReadRequirement() const { return fDstReadRequirement; }
+    DstReadStrategy dstReadStrategy() const { return fDstReadStrategy; }
     const skgpu::BlendInfo& blendInfo() const { return fBlendInfo; }
 
     const skia_private::TArray<uint32_t>& data() const { return fData; }
@@ -76,7 +81,10 @@ public:
     static constexpr char kGradientBufferName[] = "fsGradientBuffer";
 
 private:
-    ShaderInfo(const RuntimeEffectDictionary*, const char* ssboIndex);
+    ShaderInfo(const ShaderCodeDictionary*,
+               const RuntimeEffectDictionary*,
+               const char* ssboIndex,
+               DstReadStrategy);
 
     void generateVertexSkSL(const Caps*,
                             const RenderStep*,
@@ -103,6 +111,7 @@ private:
     // All shader nodes and arrays of children pointers are held in this arena
     SkArenaAlloc fShaderNodeAlloc{256};
 
+    const ShaderCodeDictionary* fShaderCodeDictionary;
     const RuntimeEffectDictionary* fRuntimeEffectDictionary;
     const char* fSsboIndex;
 
@@ -113,7 +122,7 @@ private:
     // The blendInfo represents the actual GPU blend operations, which may or may not completely
     // implement the paint and coverage blending defined by the root nodes.
     skgpu::BlendInfo fBlendInfo;
-    DstReadRequirement fDstReadRequirement = DstReadRequirement::kNone;
+    DstReadStrategy fDstReadStrategy = DstReadStrategy::kNoneRequired;
 
     // Note that fData is currently only used to store SamplerDesc information for shaders that have
     // the option of using immutable samplers. However, other snippets could leverage this field to

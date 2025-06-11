@@ -7,9 +7,11 @@
 
 #include "experimental/rust_png/encoder/impl/SkPngRustEncoderImpl.h"
 
+#include <limits>
 #include <memory>
 #include <utility>
 
+#include "experimental/rust_png/encoder/SkPngRustEncoder.h"
 #include "experimental/rust_png/ffi/FFI.rs.h"
 #include "experimental/rust_png/ffi/UtilsForFFI.h"
 #include "include/core/SkSpan.h"
@@ -39,6 +41,65 @@ rust_png::ColorType ToColorType(SkEncodedInfo::Color color) {
         default:
             SkUNREACHABLE;
     }
+}
+
+rust_png::Compression ToCompression(SkPngRustEncoder::CompressionLevel level) {
+    switch (level) {
+        case SkPngRustEncoder::CompressionLevel::kLow:
+#ifdef SK_RUST_PNG_USE_FDEFLATE_COMPRESSION_LEVELS
+            return rust_png::Compression::Fastest;
+#else
+            return rust_png::Compression::Fast;
+#endif
+        case SkPngRustEncoder::CompressionLevel::kMedium:
+#ifdef SK_RUST_PNG_USE_FDEFLATE_COMPRESSION_LEVELS
+            // Using `Fast` instead of `Balanced` because we expect that
+            // `fdeflate` will performs better than 1) `flate2` used by Rust for
+            // `Balanced` and 2) `libpng`/`zlib`-based default in Chromium.  We
+            // expect this based on the documentation linked below.  We plan to
+            // verify this using field trials.  Doc link:
+            // https://github.com/image-rs/image-png/blob/eb9b5d7f371b88f15aaca6a8d21c58b86c400d76/src/common.rs#L331-L336
+            return rust_png::Compression::Fast;
+#else
+            return rust_png::Compression::Balanced;
+#endif
+        case SkPngRustEncoder::CompressionLevel::kHigh:
+            return rust_png::Compression::High;
+    }
+    SkUNREACHABLE;
+}
+
+rust::Slice<const uint8_t> getDataTableEntry(const SkDataTable& table, int index) {
+    SkASSERT((0 <= index) && (index < table.count()));
+
+    size_t size = 0;
+    const uint8_t* entry = table.atT<uint8_t>(index, &size);
+    while (size > 0 && entry[size - 1] == 0) {
+        // Ignore trailing NUL characters - these are *not* part of Rust `&str`.
+        size--;
+    }
+
+    return rust::Slice<const uint8_t>(entry, size);
+}
+
+rust_png::EncodingResult EncodeComments(rust_png::Writer& writer,
+                                        const sk_sp<SkDataTable>& comments) {
+    if (comments != nullptr) {
+        if (comments->count() % 2 != 0) {
+            return rust_png::EncodingResult::ParameterError;
+        }
+
+        for (int i = 0; i < comments->count() / 2; ++i) {
+            rust::Slice<const uint8_t> keyword = getDataTableEntry(*comments, 2 * i);
+            rust::Slice<const uint8_t> text = getDataTableEntry(*comments, 2 * i + 1);
+            rust_png::EncodingResult result = writer.write_text_chunk(keyword, text);
+            if (result != rust_png::EncodingResult::Success) {
+                return result;
+            }
+        }
+    }
+
+    return rust_png::EncodingResult::Success;
 }
 
 // This helper class adapts `SkWStream` to expose the API required by Rust FFI
@@ -77,7 +138,9 @@ private:
 }  // namespace
 
 // static
-std::unique_ptr<SkEncoder> SkPngRustEncoderImpl::Make(SkWStream* dst, const SkPixmap& src) {
+std::unique_ptr<SkEncoder> SkPngRustEncoderImpl::Make(SkWStream* dst,
+                                                      const SkPixmap& src,
+                                                      const SkPngRustEncoder::Options& options) {
     if (!SkPixmapIsValid(src)) {
         return nullptr;
     }
@@ -95,13 +158,36 @@ std::unique_ptr<SkEncoder> SkPngRustEncoderImpl::Make(SkWStream* dst, const SkPi
         return nullptr;
     }
 
+    sk_sp<SkData> encodedProfile;
+    rust::Slice<const uint8_t> encodedProfileSlice;
+    if (const SkColorSpace* colorSpace = src.colorSpace(); colorSpace && !colorSpace->isSRGB()) {
+        encodedProfile = icc_from_color_space(colorSpace, nullptr, nullptr);
+        if (encodedProfile) {
+            encodedProfileSlice =
+                    rust::Slice<const uint8_t>(encodedProfile->bytes(), encodedProfile->size());
+        }
+    }
+
     auto writeTraitAdapter = std::make_unique<WriteTraitAdapterForSkWStream>(dst);
+    rust::Box<rust_png::ResultOfWriter> resultOfWriter =
+            rust_png::new_writer(std::move(writeTraitAdapter),
+                                 width,
+                                 height,
+                                 ToColorType(dstInfo.color()),
+                                 dstInfo.bitsPerComponent(),
+                                 ToCompression(options.fCompressionLevel),
+                                 encodedProfileSlice);
+    if (resultOfWriter->err() != rust_png::EncodingResult::Success) {
+        return nullptr;
+    }
+    rust::Box<rust_png::Writer> writer = resultOfWriter->unwrap();
+
+    if (EncodeComments(*writer, options.fComments) != rust_png::EncodingResult::Success) {
+        return nullptr;
+    }
+
     rust::Box<rust_png::ResultOfStreamWriter> resultOfStreamWriter =
-            rust_png::new_stream_writer(std::move(writeTraitAdapter),
-                                        width,
-                                        height,
-                                        ToColorType(dstInfo.color()),
-                                        dstInfo.bitsPerComponent());
+            rust_png::convert_writer_into_stream_writer(std::move(writer));
     if (resultOfStreamWriter->err() != rust_png::EncodingResult::Success) {
         return nullptr;
     }

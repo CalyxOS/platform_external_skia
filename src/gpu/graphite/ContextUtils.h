@@ -16,11 +16,13 @@
 class SkColorInfo;
 class SkM44;
 
-namespace skgpu::graphite {
+namespace skgpu {
+enum class BackendApi : unsigned int;
 
+namespace graphite {
 class ComputeStep;
 enum class Coverage;
-enum class DstReadRequirement;
+enum class DstReadStrategy : uint8_t;
 class Geometry;
 class PaintParams;
 class PipelineDataGatherer;
@@ -51,29 +53,32 @@ UniquePaintParamsID ExtractPaintData(Recorder*,
 // the logical fragment coordinate from the target's current frag coord (which are not relative to
 // active viewport).
 //
-// It is assumed that `dstCopyBounds` is in the same coordinate space as the `viewport` (e.g.
+// It is assumed that `dstReadBounds` is in the same coordinate space as the `viewport` (e.g.
 // final backing target's pixel coords) and that its width and height match the dimensions of the
 // texture to be sampled for dst reads.
 static constexpr Uniform kIntrinsicUniforms[] = { {"viewport",      SkSLType::kFloat4},
-                                                  {"dstCopyBounds", SkSLType::kFloat4} };
+                                                  {"dstReadBounds", SkSLType::kFloat4} };
 
-void CollectIntrinsicUniforms(
-        const Caps* caps,
-        SkIRect viewport,
-        SkIRect dstCopyBounds,
-        UniformManager*);
+void CollectIntrinsicUniforms(const Caps* caps,
+                              SkIRect viewport,
+                              SkIRect dstReadBounds,
+                              UniformManager*);
 
-DstReadRequirement GetDstReadRequirement(const Caps*, std::optional<SkBlendMode>, Coverage);
+bool IsDstReadRequired(const Caps*, std::optional<SkBlendMode>, Coverage);
 
 std::string GetPipelineLabel(const ShaderCodeDictionary*,
                              const RenderPassDesc& renderPassDesc,
                              const RenderStep* renderStep,
                              UniquePaintParamsID paintID);
 
-std::string BuildComputeSkSL(const Caps*, const ComputeStep*);
+// TODO(b/396420770): Right now, BuildComputeSkSL must consider the backend in order to make certain
+// decisions. It would be ideal if we could make this more backend-agnostic, perhaps by having a
+// compute-specific equivalent to ResourceBindingRequirements.
+std::string BuildComputeSkSL(const Caps*, const ComputeStep*, BackendApi);
 
 std::string EmitSamplerLayout(const ResourceBindingRequirements&, int* binding);
 
-} // namespace skgpu::graphite
+} // namespace graphite
+} // namespace skgpu
 
 #endif // skgpu_graphite_ContextUtils_DEFINED
